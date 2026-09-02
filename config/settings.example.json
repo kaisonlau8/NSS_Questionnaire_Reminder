@@ -1,0 +1,17 @@
+{
+  "national_recipients": [
+    {
+      "name": "刘明轩",
+      "open_id": ""
+    },
+    {
+      "name": "胡进",
+      "open_id": ""
+    }
+  ],
+  "offset_days": 90,
+  "remind_hour": 9,
+  "remind_minute": 0,
+  "scheduler_enabled": true,
+  "skip_store_keywords": ["虚拟店", "出口车"]
+}

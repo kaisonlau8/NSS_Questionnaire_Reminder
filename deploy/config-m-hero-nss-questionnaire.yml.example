@@ -1,0 +1,8 @@
+tunnel: REPLACE_TUNNEL_ID
+credentials-file: /Users/i/.cloudflared/REPLACE_TUNNEL_ID.json
+protocol: http2
+
+ingress:
+  - hostname: <your-hostname>
+    service: http://127.0.0.1:9005
+  - service: http_status:404

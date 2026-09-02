@@ -1,0 +1,15 @@
+.env
+.venv/
+.runtime/
+__pycache__/
+**/__pycache__/
+*.pyc
+.DS_Store
+*.log
+
+# 车辆档案含 PII，不入库
+*.xlsx
+data/*.json
+data/uploads/
+data/phone_open_ids.json
+config/settings.json
