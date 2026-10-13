@@ -110,8 +110,8 @@
     <div class="ant-card">
       <div class="ant-card-head"><h2 class="ant-card-head-title">最近任务</h2></div>
       <div class="ant-card-body">
-      <div class="tw ant-table-wrap"><table><thead><tr><th data-card-title>时间</th><th>日期</th><th>到期</th><th>已发</th><th>跳过</th><th>失败</th><th>未匹配</th></tr></thead>
-        <tbody id="log-body"><tr><td colspan="7" class="muted">暂无</td></tr></tbody>
+      <div class="tw ant-table-wrap"><table><thead><tr><th data-card-title>时间</th><th>日期</th><th>到期</th><th>已发</th><th>跳过</th><th>排除</th><th>失败</th><th>未匹配</th></tr></thead>
+        <tbody id="log-body"><tr><td colspan="8" class="muted">暂无</td></tr></tbody>
       </table></div>
       </div>
     </div>
@@ -230,7 +230,7 @@
       body.innerHTML = items.map(x => `<tr>
         <td>${x.at || ""}</td><td>${x.date || ""}${x.dry_run ? " · dry-run" : ""}</td>
         <td>${x.due_count ?? ""}</td><td>${x.sent ?? ""}</td><td>${x.skipped ?? ""}</td>
-        <td>${x.failed ?? ""}</td><td>${x.unmatched ?? ""}</td>
+        <td>${x.excluded ?? ""}</td><td>${x.failed ?? ""}</td><td>${x.unmatched ?? ""}</td>
       </tr>`).join("");
     }
     async function refreshAll() {
@@ -278,7 +278,7 @@
           body: JSON.stringify({ date, dry_run: dry }),
         });
         document.getElementById("run-hint").textContent =
-          `${data.date} 到期 ${data.due_count} · 发送 ${data.sent} · 跳过 ${data.skipped} · 失败 ${data.failed} · 未匹配 ${data.unmatched}`;
+          `${data.date} 到期 ${data.due_count} · 发送 ${data.sent} · 跳过 ${data.skipped} · 排除 ${data.excluded ?? 0} · 失败 ${data.failed} · 未匹配 ${data.unmatched}`;
         await refreshAll();
       } catch (e) {
         document.getElementById("run-hint").textContent = e.message;

@@ -6,7 +6,8 @@ from datetime import date, datetime
 from typing import Any
 
 from nss.bitable import known_people
-from nss.feishu_client import send_text_message
+from nss.exclusions import exclusion_reason, mask_vin
+from nss.feishu_client import resolve_phone_to_open_id, send_text_message
 from nss.jsonutil import load_json, save_json
 from nss.matching import enrich_vehicle
 from nss.paths import JOB_LOG_PATH, SENT_PATH
@@ -53,10 +54,13 @@ def resolve_national() -> list[dict[str, str]]:
     seen: set[str] = set()
     for item in load_settings().get("national_recipients") or []:
         name = str(item.get("name") or "").strip()
+        phone = str(item.get("phone") or "").strip()
         open_id = str(item.get("open_id") or "").strip()
         if not open_id and name in known:
             open_id = known[name].get("open_id") or ""
-        key = open_id or name
+        if not open_id and phone:
+            open_id = resolve_phone_to_open_id(phone) or ""
+        key = open_id or phone or name
         if not key or key in seen:
             continue
         seen.add(key)
@@ -115,12 +119,15 @@ def parse_day(value: str | None) -> date:
 
 def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool = False) -> dict[str, Any]:
     target = parse_day(day)
+    settings = load_settings()
     due = [enrich_vehicle(v) for v in due_on(target)]
     results: list[dict[str, Any]] = []
     sent = 0
     skipped = 0
     failed = 0
     unmatched = 0
+    excluded = 0
+    excluded_by: dict[str, int] = {}
 
     for vehicle in due:
         if vehicle.get("skipped"):
@@ -136,6 +143,24 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
             }
             skipped += 1
             results.append(item)
+            continue
+        reason = exclusion_reason(vehicle, settings)
+        if reason:
+            excluded += 1
+            excluded_by[reason] = excluded_by.get(reason, 0) + 1
+            results.append(
+                {
+                    "vin": vehicle.get("vin"),
+                    "store": vehicle.get("store"),
+                    "unmatched": False,
+                    "recipients": [],
+                    "message": "",
+                    "actions": [],
+                    "status": "excluded",
+                    "skip_reason": reason,
+                }
+            )
+            print(f"[nss] 已排除 {mask_vin(vehicle.get('vin'))}：{reason}")
             continue
         if vehicle.get("unmatched"):
             unmatched += 1
@@ -193,6 +218,8 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
         "skipped": skipped,
         "failed": failed,
         "unmatched": unmatched,
+        "excluded": excluded,
+        "excluded_by": excluded_by,
         "at": beijing_strftime("%Y-%m-%d %H:%M:%S"),
         "items": results,
     }
@@ -206,6 +233,8 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
             "skipped": skipped,
             "failed": failed,
             "unmatched": unmatched,
+            "excluded": excluded,
+            "excluded_by": excluded_by,
         }
     )
     return summary

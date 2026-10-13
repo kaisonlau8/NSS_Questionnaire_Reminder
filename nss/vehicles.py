@@ -17,8 +17,10 @@ REQUIRED_HEADERS = ("VIN", "交付日期", "交付门店")
 OPTIONAL_MAP = {
     "车牌号": "plate",
     "车系": "series",
+    "车系名称": "series_name",
     "车型": "model",
     "售后车系": "aftersales_series",
+    "数据类型": "data_type",
 }
 
 
@@ -88,7 +90,10 @@ def parse_excel(path: Path) -> list[dict[str, Any]]:
             "store": str(row[idx["交付门店"]] or "").strip(),
             "plate": "",
             "series": "",
+            "series_name": "",
             "model": "",
+            "aftersales_series": "",
+            "data_type": "",
         }
         for header, key in OPTIONAL_MAP.items():
             if header in idx:
