@@ -106,19 +106,67 @@ def test_eligible_data_types_pass(patched):
     assert all(i["status"] == "dry_run" for i in result["items"])
 
 
-def test_recipients_only_managers():
+def test_recipients_managers_and_supervisors():
     vehicle = make_vehicle(
         "LSVRECIPS0000001",
         managers=[{"name": "经理A", "open_id": "ou_manager_a"}, {"name": "经理B", "open_id": ""}],
-        supervisors=[{"name": "督导C", "open_id": "ou_supervisor_c"}],
+        supervisors=[{"name": "督导C", "open_id": "ou_supervisor_c"}, {"name": "督导D", "open_id": ""}],
     )
     recs = reminder.recipients_for(vehicle)
-    assert [r["role"] for r in recs] == ["manager", "manager"]
-    assert [r["name"] for r in recs] == ["经理A", "经理B"]
+    assert [(r["name"], r["role"]) for r in recs] == [
+        ("经理A", "manager"),
+        ("经理B", "manager"),
+        ("督导C", "supervisor"),
+        ("督导D", "supervisor"),
+    ]
+    assert all(r["role"] != "national" for r in recs)
     assert not hasattr(reminder, "resolve_national")
 
 
-def test_recipients_managers_only_in_run(patched, monkeypatch):
+def test_recipients_dedupe_same_open_id():
+    vehicle = make_vehicle(
+        "LSVDEDUPE0000001",
+        managers=[{"name": "王五", "open_id": "ou_same"}],
+        supervisors=[{"name": "王五", "open_id": "ou_same"}, {"name": "督导E", "open_id": "ou_same"}],
+    )
+    recs = reminder.recipients_for(vehicle)
+    assert [(r["name"], r["role"]) for r in recs] == [("王五", "manager")]
+
+
+def test_recipients_dedupe_same_name_without_open_id():
+    vehicle = make_vehicle(
+        "LSVDEDUPNAME0001",
+        managers=[{"name": "赵六", "open_id": "ou_manager_zhao"}],
+        supervisors=[{"name": "赵六", "open_id": ""}, {"name": "督导F", "open_id": "ou_supervisor_f"}],
+    )
+    recs = reminder.recipients_for(vehicle)
+    assert [(r["name"], r["role"]) for r in recs] == [
+        ("赵六", "manager"),
+        ("督导F", "supervisor"),
+    ]
+
+
+def test_national_recipients_excluded(patched):
+    vehicle = make_vehicle(
+        "LSVNATION0000001",
+        managers=[{"name": "经理A", "open_id": "ou_manager_a"}],
+        supervisors=[{"name": "督导C", "open_id": "ou_supervisor_c"}],
+    )
+    settings = {
+        "eligibility": DEFAULT_SETTINGS["eligibility"],
+        "offset_days": 90,
+        "national_recipients": [{"name": "刘明轩"}, {"name": "胡进"}],
+    }
+    sent, _, _ = patched([vehicle], settings=settings, patch_recipients=False)
+    result = reminder.run_reminders(day="2026-01-01", dry_run=False)
+
+    names = [r["name"] for r in result["items"][0]["recipients"]]
+    assert "刘明轩" not in names and "胡进" not in names
+    assert names == ["经理A", "督导C"]
+    assert sorted(open_id for open_id, _ in sent) == ["ou_manager_a", "ou_supervisor_c"]
+
+
+def test_recipients_managers_and_supervisors_in_run(patched, monkeypatch):
     vehicle = make_vehicle(
         "LSVSEND000000001",
         managers=[{"name": "经理A", "open_id": "ou_manager_a"}],
@@ -129,8 +177,12 @@ def test_recipients_managers_only_in_run(patched, monkeypatch):
 
     assert result["sent"] == 1
     assert result["items"][0]["status"] == "sent"
-    assert [r["name"] for r in result["items"][0]["recipients"]] == ["经理A"]
-    assert sent == [("ou_manager_a", result["items"][0]["message"])]
+    assert [(r["name"], r["role"]) for r in result["items"][0]["recipients"]] == [
+        ("经理A", "manager"),
+        ("督导C", "supervisor"),
+    ]
+    assert sorted(open_id for open_id, _ in sent) == ["ou_manager_a", "ou_supervisor_c"]
+    assert all(text == result["items"][0]["message"] for _, text in sent)
     assert marked == ["LSVSEND000000001"]
 
 

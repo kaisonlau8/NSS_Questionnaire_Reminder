@@ -1,4 +1,4 @@
-"""按创建时间（交付日）+90 天发送 NSS 问卷私聊，仅发门店服务经理。"""
+"""按创建时间（交付日）+90 天发送 NSS 问卷私聊，发给门店服务经理与对应督导。"""
 
 from __future__ import annotations
 
@@ -48,17 +48,28 @@ def already_sent(vin: str, due_date: str) -> bool:
 
 
 def recipients_for(vehicle: dict[str, Any]) -> list[dict[str, str]]:
-    """收件人只有门店服务经理；督导与全国收件人不再接收。"""
+    """收件人 = 门店服务经理 + 该门店/区域督导；先经理后督导，按 open_id（缺失时按姓名）去重。
+
+    同一人既是经理又是督导只发一条（role 记为 manager）；不含全国收件人。
+    """
     people: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item in vehicle.get("managers") or []:
-        name = str(item.get("name") or "").strip()
-        open_id = str(item.get("open_id") or "").strip()
-        key = open_id or name
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        people.append({"name": name, "open_id": open_id, "role": "manager"})
+    seen_open_ids: set[str] = set()
+    seen_names: set[str] = set()
+    for role, field in (("manager", "managers"), ("supervisor", "supervisors")):
+        for item in vehicle.get(field) or []:
+            name = str(item.get("name") or "").strip()
+            open_id = str(item.get("open_id") or "").strip()
+            if not name and not open_id:
+                continue
+            if open_id and open_id in seen_open_ids:
+                continue
+            if name and name in seen_names:
+                continue
+            if open_id:
+                seen_open_ids.add(open_id)
+            if name:
+                seen_names.add(name)
+            people.append({"name": name, "open_id": open_id, "role": role})
     return people
 
 
@@ -130,6 +141,7 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
             "vin": vehicle.get("vin"),
             "store": vehicle.get("store"),
             "unmatched": bool(vehicle.get("unmatched")),
+            "match_method": vehicle.get("match_method") or ("none" if vehicle.get("unmatched") else ""),
             "recipients": recs,
             "message": text,
             "actions": [],
@@ -165,7 +177,7 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
         else:
             item["status"] = "failed"
             if not errors:
-                errors.append("门店未匹配，无服务经理" if vehicle.get("unmatched") else "没有可发送的收件人")
+                errors.append("门店未匹配，无服务经理/督导" if vehicle.get("unmatched") else "没有可发送的收件人")
         item["errors"] = errors
         results.append(item)
 

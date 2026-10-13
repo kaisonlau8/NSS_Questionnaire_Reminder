@@ -50,8 +50,21 @@ def _score(left: str, right: str) -> int:
     return 0
 
 
-def match_store(store_name: str, stores: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+def _norm_code(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def match_store(
+    store_name: str,
+    stores: list[dict[str, Any]] | None = None,
+    store_code: str = "",
+) -> dict[str, Any] | None:
     stores = stores if stores is not None else load_stores()
+    code = _norm_code(store_code)
+    if code:
+        for store in stores:
+            if _norm_code(store.get("code")) == code:
+                return store
     best: dict[str, Any] | None = None
     best_score = 0
     for store in stores:
@@ -62,7 +75,11 @@ def match_store(store_name: str, stores: list[dict[str, Any]] | None = None) -> 
     return best if best_score >= 70 else None
 
 
-def supervisors_for_store(store: dict[str, Any] | None, delivery_store: str) -> list[dict[str, str]]:
+def supervisors_for_store(
+    store: dict[str, Any] | None,
+    delivery_store: str,
+    region: str = "",
+) -> list[dict[str, str]]:
     people: list[dict[str, str]] = []
     seen: set[str] = set()
 
@@ -80,12 +97,15 @@ def supervisors_for_store(store: dict[str, Any] | None, delivery_store: str) -> 
         _add(store.get("supervisors") or [])
     for row in load_supervisors():
         linked = [str(x) for x in (row.get("stores") or [])]
-        region = str(row.get("region") or "")
+        row_region = str(row.get("region") or "")
         hit = False
         if linked:
             hit = any(_score(delivery_store, name) >= 70 or (store and _score(str(store.get("name") or ""), name) >= 70) for name in linked)
-        elif region and store and _score(region, str(store.get("region") or "")) >= 70:
-            hit = True
+        elif row_region:
+            if store and _score(row_region, str(store.get("region") or "")) >= 70:
+                hit = True
+            elif not store and region and _score(row_region, region) >= 70:
+                hit = True
         if hit:
             _add(row.get("people") or [])
     return people
@@ -94,15 +114,27 @@ def supervisors_for_store(store: dict[str, Any] | None, delivery_store: str) -> 
 def enrich_vehicle(vehicle: dict[str, Any], stores: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     stores = stores if stores is not None else load_stores()
     delivery_store = str(vehicle.get("store") or "")
-    store = match_store(delivery_store, stores)
+    store_code = str(vehicle.get("store_code") or "")
+    vehicle_region = str(vehicle.get("region") or "")
+    store = match_store(delivery_store, stores, store_code)
+    supervisors = supervisors_for_store(store, delivery_store, vehicle_region)
+    if store is not None and store_code and _norm_code(store.get("code")) == _norm_code(store_code):
+        match_method = "code"
+    elif store is not None:
+        match_method = "name"
+    elif vehicle_region and supervisors:
+        match_method = "region"
+    else:
+        match_method = "none"
     managers = list((store or {}).get("managers") or [])
     manager_names = "、".join(p.get("name") or "" for p in managers if p.get("name"))
     return {
         **vehicle,
         "matched_store": (store or {}).get("name") or "",
-        "region": (store or {}).get("region") or "",
+        "region": (store or {}).get("region") or vehicle_region,
         "manager_name": manager_names,
         "managers": managers,
-        "supervisors": supervisors_for_store(store, delivery_store),
+        "supervisors": supervisors,
+        "match_method": match_method,
         "unmatched": store is None,
     }

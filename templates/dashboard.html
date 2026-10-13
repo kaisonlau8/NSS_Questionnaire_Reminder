@@ -24,7 +24,7 @@
     <header class="ant-page-header">
       <div class="ant-page-header-heading">
         <h1>交付问卷提醒控制台</h1>
-        <div class="ant-page-header-sub">车辆交付 90 天后，当天 09:00 私聊门店服务经理（仅「全新M817」车系，试驾车除外）</div>
+        <div class="ant-page-header-sub">车辆交付 90 天后，当天 09:00 私聊门店服务经理与对应督导（仅「全新M817」车系，试驾车除外）</div>
       </div>
     </header>
 
@@ -111,7 +111,14 @@
       return data;
     }
     function namesOf(items) {
-      return (items || []).map(p => p.name || p.open_id || "").filter(Boolean).join("、") || "—";
+      const roleLabel = { manager: "服务经理", supervisor: "督导" };
+      return (items || []).map(p => {
+        if (!p) return "";
+        const base = p.name || p.open_id || "";
+        if (!base) return "";
+        const label = roleLabel[p.role];
+        return label ? `${base}（${label}）` : base;
+      }).filter(Boolean).join("、") || "—";
     }
     function fillStatus(s) {
       document.getElementById("s-vehicles").textContent = s.vehicles.count || 0;
@@ -149,11 +156,14 @@
         return;
       }
       body.innerHTML = data.items.map(v => {
+        const methodLabel = { code: "编码", name: "名称", region: "区域" };
         const badge = v.excluded_reason
           ? `<span class="ant-tag ant-tag-error">排除：${v.excluded_reason}</span>`
           : (v.unmatched
-            ? '<span class="ant-tag ant-tag-warning">未匹配门店</span>'
-            : '<span class="ant-tag ant-tag-success">已匹配</span>');
+            ? (v.match_method === "region"
+              ? '<span class="ant-tag ant-tag-warning">区域匹配督导</span>'
+              : '<span class="ant-tag ant-tag-warning">未匹配门店</span>')
+            : `<span class="ant-tag ant-tag-success">已匹配（${methodLabel[v.match_method] || "名称"}）</span>`);
         return `<tr>
           <td>${v.vin || ""}</td>
           <td>${v.delivery_date || ""}</td>
