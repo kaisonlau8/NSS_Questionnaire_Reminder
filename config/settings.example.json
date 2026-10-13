@@ -1,17 +1,10 @@
 {
-  "national_recipients": [
-    {"name": "刘明轩", "phone": "", "open_id": ""},
-    {"name": "胡进", "phone": "", "open_id": ""}
-  ],
   "offset_days": 90,
   "remind_hour": 9,
   "remind_minute": 0,
   "scheduler_enabled": true,
-  "skip_store_keywords": ["虚拟店", "出口车"],
-  "exclusions": {
-    "enabled": true,
-    "series": ["917"],
-    "data_types": ["试驾车"],
-    "model_keyword_test_drive": true
+  "eligibility": {
+    "series_names": ["全新M817"],
+    "excluded_data_types": ["试驾车"]
   }
 }

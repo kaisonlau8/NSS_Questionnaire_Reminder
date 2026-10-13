@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
-from nss.bitable import known_people, load_stores, load_supervisors, load_sync_state, sync_all  # noqa: E402
+from nss.bitable import load_stores, load_supervisors, load_sync_state, sync_all  # noqa: E402
+from nss.eligibility import ineligible_reason  # noqa: E402
 from nss.matching import enrich_vehicle  # noqa: E402
 from nss.paths import UPLOAD_DIR, ensure_dirs  # noqa: E402
 from nss.reminder import recent_logs, recipients_for, run_reminders, sent_today_count  # noqa: E402
@@ -57,40 +58,6 @@ _mhero_auth_init(app, "nss", default_mode="off")
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
 
-def _resolve_recipients(items: list) -> list[dict[str, str]]:
-    from nss.feishu_client import resolve_phone_to_open_id
-
-    known = {p["name"]: p.get("open_id") or "" for p in known_people() if p.get("name")}
-    current = {
-        p["name"]: p
-        for p in load_settings().get("national_recipients") or []
-        if p.get("name")
-    }
-    out: list[dict[str, str]] = []
-    for item in items:
-        if isinstance(item, str):
-            name = item.strip()
-            phone = ""
-            open_id = ""
-        elif isinstance(item, dict):
-            name = str(item.get("name") or "").strip()
-            phone = str(item.get("phone") or "").strip()
-            open_id = str(item.get("open_id") or "").strip()
-        else:
-            continue
-        if not name and not phone:
-            continue
-        previous = current.get(name) or {}
-        if not phone:
-            phone = str(previous.get("phone") or "")
-        if not open_id:
-            open_id = str(previous.get("open_id") or "") or known.get(name) or ""
-        if not open_id and phone:
-            open_id = resolve_phone_to_open_id(phone) or ""
-        out.append({"name": name, "phone": phone, "open_id": open_id})
-    return out
-
-
 def _directory_rows() -> list[dict]:
     rows = []
     for store in load_stores():
@@ -114,10 +81,6 @@ def _status_payload() -> dict:
     settings = load_settings()
     meta = vehicles_meta()
     due = [enrich_vehicle(v) for v in load_vehicles() if v.get("due_date") == beijing_today().isoformat()]
-    unresolved = [
-        p for p in settings.get("national_recipients") or []
-        if not p.get("open_id")
-    ]
     return {
         "now": beijing_strftime("%Y-%m-%d %H:%M:%S"),
         "vehicles": meta,
@@ -127,10 +90,10 @@ def _status_payload() -> dict:
         "sync": load_sync_state(),
         "due_today": len(due),
         "due_unmatched": sum(1 for v in due if v.get("unmatched")),
+        "due_excluded": sum(1 for v in due if ineligible_reason(v, settings)),
         "sent_today": sent_today_count(),
         "next_due_date": next_due_date(),
         "settings": settings,
-        "unresolved_nationals": unresolved,
         "scheduler": scheduler_status(),
         "app_id": os.getenv("APP_ID", ""),
     }
@@ -153,6 +116,7 @@ def api_due():
         day = datetime.strptime(raw, "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"ok": False, "error": "日期格式应为 YYYY-MM-DD"}), 400
+    settings = load_settings()
     items = []
     for vehicle in load_vehicles():
         if vehicle.get("due_date") != day.isoformat():
@@ -162,6 +126,7 @@ def api_due():
             {
                 **enriched,
                 "recipients": recipients_for(enriched),
+                "excluded_reason": ineligible_reason(enriched, settings),
             }
         )
     return jsonify({"ok": True, "date": day.isoformat(), "count": len(items), "items": items})
@@ -196,8 +161,6 @@ def api_sync():
 @app.post("/api/settings")
 def api_settings():
     body = request.get_json(silent=True) or {}
-    if "national_recipients" in body:
-        body["national_recipients"] = _resolve_recipients(body.get("national_recipients") or [])
     settings = save_settings(body)
     return jsonify({"ok": True, "settings": settings})
 

@@ -1,13 +1,12 @@
-"""按交付日 +90 天发送 NSS 问卷私聊。"""
+"""按创建时间（交付日）+90 天发送 NSS 问卷私聊，仅发门店服务经理。"""
 
 from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
 
-from nss.bitable import known_people
-from nss.exclusions import exclusion_reason, mask_vin
-from nss.feishu_client import resolve_phone_to_open_id, send_text_message
+from nss.eligibility import ineligible_reason, mask_vin
+from nss.feishu_client import send_text_message
 from nss.jsonutil import load_json, save_json
 from nss.matching import enrich_vehicle
 from nss.paths import JOB_LOG_PATH, SENT_PATH
@@ -21,7 +20,7 @@ def build_message(vehicle: dict[str, Any]) -> str:
         f"VIN：{vehicle.get('vin') or ''}",
         f"交付日期：{vehicle.get('delivery_date') or ''}",
         f"车牌号：{vehicle.get('plate') or ''}",
-        f"车系：{vehicle.get('series') or ''}",
+        f"车系：{vehicle.get('series_name') or vehicle.get('series') or ''}",
         f"车型：{vehicle.get('model') or ''}",
         f"交付门店：{vehicle.get('store') or ''}",
         f"门店服务经理：{vehicle.get('manager_name') or ''}",
@@ -48,43 +47,18 @@ def already_sent(vin: str, due_date: str) -> bool:
     return _sent_key(vin, due_date) in keys
 
 
-def resolve_national() -> list[dict[str, str]]:
-    known = {p["name"]: p for p in known_people() if p.get("name")}
-    out: list[dict[str, str]] = []
+def recipients_for(vehicle: dict[str, Any]) -> list[dict[str, str]]:
+    """收件人只有门店服务经理；督导与全国收件人不再接收。"""
+    people: list[dict[str, str]] = []
     seen: set[str] = set()
-    for item in load_settings().get("national_recipients") or []:
+    for item in vehicle.get("managers") or []:
         name = str(item.get("name") or "").strip()
-        phone = str(item.get("phone") or "").strip()
         open_id = str(item.get("open_id") or "").strip()
-        if not open_id and name in known:
-            open_id = known[name].get("open_id") or ""
-        if not open_id and phone:
-            open_id = resolve_phone_to_open_id(phone) or ""
-        key = open_id or phone or name
+        key = open_id or name
         if not key or key in seen:
             continue
         seen.add(key)
-        out.append({"name": name, "open_id": open_id, "role": "national"})
-    return out
-
-
-def recipients_for(vehicle: dict[str, Any]) -> list[dict[str, str]]:
-    people: list[dict[str, str]] = []
-    seen: set[str] = set()
-
-    def _add(items: list[dict[str, str]], role: str) -> None:
-        for item in items:
-            name = str(item.get("name") or "").strip()
-            open_id = str(item.get("open_id") or "").strip()
-            key = open_id or f"{role}:{name}"
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            people.append({"name": name, "open_id": open_id, "role": role})
-
-    _add(vehicle.get("managers") or [], "manager")
-    _add(vehicle.get("supervisors") or [], "supervisor")
-    _add(resolve_national(), "national")
+        people.append({"name": name, "open_id": open_id, "role": "manager"})
     return people
 
 
@@ -130,21 +104,7 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
     excluded_by: dict[str, int] = {}
 
     for vehicle in due:
-        if vehicle.get("skipped"):
-            item = {
-                "vin": vehicle.get("vin"),
-                "store": vehicle.get("store"),
-                "unmatched": False,
-                "recipients": [],
-                "message": "",
-                "actions": [],
-                "status": "skipped_store",
-                "skip_reason": vehicle.get("skip_reason") or "",
-            }
-            skipped += 1
-            results.append(item)
-            continue
-        reason = exclusion_reason(vehicle, settings)
+        reason = ineligible_reason(vehicle, settings)
         if reason:
             excluded += 1
             excluded_by[reason] = excluded_by.get(reason, 0) + 1
@@ -205,7 +165,7 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
         else:
             item["status"] = "failed"
             if not errors:
-                errors.append("没有可发送的收件人")
+                errors.append("门店未匹配，无服务经理" if vehicle.get("unmatched") else "没有可发送的收件人")
         item["errors"] = errors
         results.append(item)
 

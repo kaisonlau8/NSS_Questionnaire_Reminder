@@ -24,13 +24,14 @@
     <header class="ant-page-header">
       <div class="ant-page-header-heading">
         <h1>交付问卷提醒控制台</h1>
-        <div class="ant-page-header-sub">车辆交付 90 天后，当天 09:00 私聊督导、门店服务经理与全国收件人</div>
+        <div class="ant-page-header-sub">车辆交付 90 天后，当天 09:00 私聊门店服务经理（仅「全新M817」车系，试驾车除外）</div>
       </div>
     </header>
 
     <div class="grid">
       <div class="stat"><div class="num" id="s-vehicles">{{ status.vehicles.count }}</div><div class="label">车辆档案</div></div>
       <div class="stat"><div class="num" id="s-due">{{ status.due_today }}</div><div class="label">今日到期</div></div>
+      <div class="stat"><div class="num" id="s-excluded">{{ status.due_excluded }}</div><div class="label">今日排除</div></div>
       <div class="stat"><div class="num" id="s-sent">{{ status.sent_today }}</div><div class="label">今日已发</div></div>
       <div class="stat"><div class="num" id="s-stores">{{ status.store_count }}</div><div class="label">门店清单</div></div>
       <div class="stat"><div class="num" id="s-supers">{{ status.supervisor_count }}</div><div class="label">督导表</div></div>
@@ -53,7 +54,7 @@
     <div class="ant-card">
       <div class="ant-card-head"><h2 class="ant-card-head-title">上传车辆档案</h2></div>
       <div class="ant-card-body">
-      <p class="muted">模板列：VIN、车系、车型、车牌号、交付日期、交付门店。上传后整表覆盖本地档案。</p>
+      <p class="muted">新版「客户车辆关系」导出。模板列：VIN、车系名称、售后车系、车型名称、车牌号、数据类型、创建时间（交付日期）、交付门店名称/编码、所属门店名称/编码。上传后整表覆盖本地档案；创建时间为空的行跳过，用车人/车主个人信息不落库。</p>
       <div class="ant-flex">
         <input type="file" id="excel" accept=".xlsx">
         <button class="ant-btn ant-btn-primary" onclick="uploadExcel()"><svg class="ai" aria-hidden="true"><use href="#i-upload"/></svg>上传并导入</button>
@@ -68,22 +69,6 @@
       <div class="tw ant-table-wrap"><table><thead><tr><th>店代码</th><th data-card-title>店名称</th><th>区域</th><th>督导</th><th>售后负责人</th></tr></thead>
         <tbody id="store-body"><tr><td colspan="5" class="muted">尚未同步</td></tr></tbody>
       </table></div>
-      </div>
-    </div>
-
-    <div class="ant-card">
-      <div class="ant-card-head"><h2 class="ant-card-head-title">全国收件人</h2></div>
-      <div class="ant-card-body">
-      <p class="muted">本系统单独配置。每台到期车还会发给这里的人。填写姓名和飞书手机号；已有 open_id 的人可以不填手机号。</p>
-      <div class="ant-flex">
-        <input class="ant-input" id="nat-name" placeholder="姓名" style="width:140px">
-        <input class="ant-input" id="nat-phone" placeholder="手机号" style="width:160px">
-        <button class="ant-btn ant-btn-primary" onclick="addNational()"><svg class="ai" aria-hidden="true"><use href="#i-plus"/></svg>新增</button>
-      </div>
-      <div class="tw ant-table-wrap ant-mt-3"><table><thead><tr><th data-card-title>姓名</th><th>手机号</th><th>解析</th><th></th></tr></thead>
-        <tbody id="national-body"></tbody>
-      </table></div>
-      <p class="muted ant-mt-2" id="national-hint"></p>
       </div>
     </div>
 
@@ -131,6 +116,7 @@
     function fillStatus(s) {
       document.getElementById("s-vehicles").textContent = s.vehicles.count || 0;
       document.getElementById("s-due").textContent = s.due_today || 0;
+      document.getElementById("s-excluded").textContent = s.due_excluded ?? 0;
       document.getElementById("s-sent").textContent = s.sent_today || 0;
       document.getElementById("s-stores").textContent = s.store_count || 0;
       document.getElementById("s-supers").textContent = s.supervisor_count || 0;
@@ -142,23 +128,7 @@
       document.getElementById("sync-hint").textContent = sync.synced_at
         ? `上次同步 ${sync.synced_at} · 门店 ${sync.store_count || 0} · 督导 ${sync.supervisor_count || 0}`
         : "尚未同步多维表。若提示无权限，请把 HeroClaw 加为该 Base 的文档应用。";
-      renderNationals(s.settings && s.settings.national_recipients || []);
       renderStores(s.stores || []);
-    }
-    let nationalRows = [];
-    function renderNationals(recs) {
-      nationalRows = recs || [];
-      const body = document.getElementById("national-body");
-      body.innerHTML = nationalRows.map((p, i) => `<tr>
-        <td>${p.name || "—"}</td>
-        <td>${p.phone || "—"}</td>
-        <td>${p.open_id ? "已解析" : '<span class="ant-tag ant-tag-error">未解析</span>'}</td>
-        <td><button class="ant-btn ant-btn-sm ant-btn-danger" onclick="removeNational(${i})"><svg class="ai" aria-hidden="true"><use href="#i-delete"/></svg>删除</button></td>
-      </tr>`).join("") || `<tr><td colspan="4" class="muted">暂无全国收件人</td></tr>`;
-      const unresolved = nationalRows.filter(p => !p.open_id).map(p => p.name || p.phone).join("、");
-      document.getElementById("national-hint").textContent = unresolved
-        ? `尚未解析：${unresolved}`
-        : (nationalRows.length ? "全部已解析" : "");
     }
     function renderStores(stores) {
       const body = document.getElementById("store-body");
@@ -172,33 +142,6 @@
         <td>${s.manager_ok ? (s.manager || "已配置") : '<span class="ant-tag ant-tag-error">无联系人</span>'}</td>
       </tr>`).join("");
     }
-    async function saveNationals(rows) {
-      const data = await api("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ national_recipients: rows }),
-      });
-      renderNationals(data.settings.national_recipients || []);
-    }
-    async function addNational() {
-      const name = document.getElementById("nat-name").value.trim();
-      const phone = document.getElementById("nat-phone").value.trim();
-      if (!name && !phone) return;
-      try {
-        await saveNationals(nationalRows.concat([{ name, phone }]));
-        document.getElementById("nat-name").value = "";
-        document.getElementById("nat-phone").value = "";
-      } catch (e) {
-        document.getElementById("national-hint").textContent = e.message;
-      }
-    }
-    async function removeNational(index) {
-      try {
-        await saveNationals(nationalRows.filter((_, i) => i !== index));
-      } catch (e) {
-        document.getElementById("national-hint").textContent = e.message;
-      }
-    }
     function fillDue(data) {
       const body = document.getElementById("due-body");
       if (!data.items || !data.items.length) {
@@ -206,8 +149,8 @@
         return;
       }
       body.innerHTML = data.items.map(v => {
-        const badge = v.skipped
-          ? `<span class="ant-tag ant-tag-warning">${v.skip_reason || "已跳过"}</span>`
+        const badge = v.excluded_reason
+          ? `<span class="ant-tag ant-tag-error">排除：${v.excluded_reason}</span>`
           : (v.unmatched
             ? '<span class="ant-tag ant-tag-warning">未匹配门店</span>'
             : '<span class="ant-tag ant-tag-success">已匹配</span>');
@@ -250,7 +193,10 @@
       fd.append("file", file);
       try {
         const data = await api("/api/upload", { method: "POST", body: fd });
-        document.getElementById("upload-hint").textContent = `已导入 ${data.count} 台 · ${data.imported_at}`;
+        const st = data.stats;
+        document.getElementById("upload-hint").textContent = st
+          ? `已导入 ${data.count} 台 · 无创建时间跳过 ${st.skipped_no_date} · 重复 VIN ${st.duplicates}`
+          : `已导入 ${data.count} 台 · ${data.imported_at}`;
         await refreshAll();
       } catch (e) {
         document.getElementById("upload-hint").textContent = e.message;

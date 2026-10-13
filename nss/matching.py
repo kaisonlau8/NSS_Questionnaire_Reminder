@@ -6,7 +6,6 @@ import re
 from typing import Any
 
 from nss.bitable import load_stores, load_supervisors
-from nss.settings import load_settings
 
 _PREFIXES = ("猛士汽车", "猛士")
 _SUFFIXES = (
@@ -95,12 +94,7 @@ def supervisors_for_store(store: dict[str, Any] | None, delivery_store: str) -> 
 def enrich_vehicle(vehicle: dict[str, Any], stores: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     stores = stores if stores is not None else load_stores()
     delivery_store = str(vehicle.get("store") or "")
-    skip_reason = ""
-    for keyword in load_settings().get("skip_store_keywords") or []:
-        if keyword and keyword in delivery_store:
-            skip_reason = f"跳过（{keyword}）"
-            break
-    store = None if skip_reason else match_store(delivery_store, stores)
+    store = match_store(delivery_store, stores)
     managers = list((store or {}).get("managers") or [])
     manager_names = "、".join(p.get("name") or "" for p in managers if p.get("name"))
     return {
@@ -109,8 +103,6 @@ def enrich_vehicle(vehicle: dict[str, Any], stores: list[dict[str, Any]] | None 
         "region": (store or {}).get("region") or "",
         "manager_name": manager_names,
         "managers": managers,
-        "supervisors": supervisors_for_store(store, str(vehicle.get("store") or "")),
-        "unmatched": store is None and not skip_reason,
-        "skipped": bool(skip_reason),
-        "skip_reason": skip_reason,
+        "supervisors": supervisors_for_store(store, delivery_store),
+        "unmatched": store is None,
     }
