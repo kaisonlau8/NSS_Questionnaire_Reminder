@@ -19,7 +19,8 @@ HEADERS = [
 
 def row(vin, series="全新M817", data_type="客户", created="2026-07-17",
         delivery_store="猛士汽车北京交付中心", delivery_code="S001",
-        owner_store="", plate="京A12345", **extra):
+        owner_store="猛士汽车北京朝阳用户中心", owner_code="SS001",
+        plate="京A12345", headers=HEADERS, **extra):
     cells = {h: "" for h in HEADERS}
     cells.update(
         {
@@ -33,10 +34,11 @@ def row(vin, series="全新M817", data_type="客户", created="2026-07-17",
             "售后车系": "M817",
             "车型名称": "全新M817 HERO",
             "所属门店名称": owner_store,
+            "所属门店编码": owner_code,
         }
     )
     cells.update(extra)
-    return [cells[h] for h in HEADERS]
+    return [cells.get(h, "") for h in headers]
 
 
 @pytest.fixture(autouse=True)
@@ -63,8 +65,11 @@ def test_due_date_is_created_plus_90(tmp_path):
     assert vehicle["vin"] == "LSVNEW000000001"
     assert vehicle["delivery_date"] == "2026-07-17"
     assert vehicle["due_date"] == (date(2026, 7, 17) + timedelta(days=90)).isoformat()
-    assert vehicle["store"] == "猛士汽车北京交付中心"
-    assert vehicle["store_code"] == "S001"
+    # 门店取所属门店，不取交付门店
+    assert vehicle["store"] == "猛士汽车北京朝阳用户中心"
+    assert vehicle["store_code"] == "SS001"
+    assert vehicle["delivery_store"] == "猛士汽车北京交付中心"
+    assert vehicle["delivery_store_code"] == "S001"
     assert vehicle["plate"] == "京A12345"
     assert vehicle["series_name"] == "全新M817"
     assert vehicle["aftersales_series"] == "M817"
@@ -95,14 +100,14 @@ def test_vin_dedup_first_wins(tmp_path):
     path = make_xlsx(
         tmp_path / "cars.xlsx",
         [
-            row("LSVDUP0000000001", delivery_store="猛士汽车北京交付中心"),
-            row("LSVDUP0000000001", delivery_store="猛士汽车上海交付中心"),
+            row("LSVDUP0000000001", owner_store="猛士汽车北京朝阳用户中心"),
+            row("LSVDUP0000000001", owner_store="猛士汽车上海用户中心"),
         ],
     )
     parsed = parse_excel(path)
     assert parsed["stats"]["imported"] == 1
     assert parsed["stats"]["duplicates"] == 1
-    assert parsed["vehicles"][0]["store"] == "猛士汽车北京交付中心"
+    assert parsed["vehicles"][0]["store"] == "猛士汽车北京朝阳用户中心"
 
 
 def test_pii_not_stored(tmp_path):
@@ -121,13 +126,32 @@ def test_pii_not_stored(tmp_path):
         assert key not in parsed["vehicles"][0]
 
 
-def test_store_fallback_to_owner_store(tmp_path):
+def test_no_fallback_to_delivery_store(tmp_path, monkeypatch):
+    import nss.matching as matching
+
+    monkeypatch.setattr(matching, "load_supervisors", lambda: [])
     path = make_xlsx(
         tmp_path / "cars.xlsx",
-        [row("LSVFALLBACK00001", delivery_store="", owner_store="猛士汽车武汉用户中心")],
+        [row("LSVNOOWNER0000001", owner_store="", owner_code="")],
     )
     parsed = parse_excel(path)
-    assert parsed["vehicles"][0]["store"] == "猛士汽车武汉用户中心"
+    vehicle = parsed["vehicles"][0]
+    assert vehicle["store"] == ""
+    assert vehicle["store_code"] == ""
+    assert vehicle["delivery_store"] == "猛士汽车北京交付中心"
+    stores = [
+        {
+            "name": "猛士汽车北京交付中心",
+            "aliases": [],
+            "code": "S001",
+            "region": "",
+            "managers": [],
+            "supervisors": [],
+        }
+    ]
+    enriched = matching.enrich_vehicle(vehicle, stores)
+    assert enriched["unmatched"]
+    assert enriched["match_method"] == "none"
 
 
 def test_eligibility_not_applied_at_import(tmp_path):
@@ -145,10 +169,35 @@ def test_eligibility_not_applied_at_import(tmp_path):
 
 
 def test_missing_required_headers(tmp_path):
-    path = make_xlsx(tmp_path / "cars.xlsx", [row("LSVMISSING0000001")], headers=[h for h in HEADERS if h != "创建时间"])
+    headers = [h for h in HEADERS if h != "创建时间"]
+    path = make_xlsx(tmp_path / "cars.xlsx", [row("LSVMISSING0000001", headers=headers)], headers=headers)
     with pytest.raises(ValueError) as exc:
         parse_excel(path)
     assert "创建时间" in str(exc.value)
+
+
+def test_missing_owner_store_header(tmp_path):
+    headers = [h for h in HEADERS if h != "所属门店名称"]
+    path = make_xlsx(
+        tmp_path / "cars.xlsx",
+        [row("LSVNOHEADER0000001", headers=headers)],
+        headers=headers,
+    )
+    with pytest.raises(ValueError) as exc:
+        parse_excel(path)
+    assert "所属门店名称" in str(exc.value)
+
+
+def test_owner_store_code_optional(tmp_path):
+    headers = [h for h in HEADERS if h != "所属门店编码"]
+    path = make_xlsx(
+        tmp_path / "cars.xlsx",
+        [row("LSVNOCODE000000001", headers=headers)],
+        headers=headers,
+    )
+    parsed = parse_excel(path)
+    assert parsed["vehicles"][0]["store"] == "猛士汽车北京朝阳用户中心"
+    assert parsed["vehicles"][0]["store_code"] == ""
 
 
 def test_old_format_still_accepted(tmp_path):

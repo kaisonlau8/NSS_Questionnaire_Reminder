@@ -13,9 +13,9 @@ from nss.paths import DATASOURCE_DIR, ROOT, UPLOAD_DIR, VEHICLES_PATH
 from nss.settings import load_settings
 from nss.time_utils import beijing_strftime, beijing_today
 
-# 新版「客户车辆关系」导出：创建时间即交付日期
-NEW_FORMAT_MARKERS = ("创建时间", "交付门店名称")
-NEW_REQUIRED_HEADERS = ("VIN", "车系名称", "创建时间", "交付门店名称")
+# 新版「客户车辆关系」导出：创建时间即交付日期；门店匹配只用「所属门店」列
+NEW_FORMAT_MARKERS = ("创建时间", "所属门店名称")
+NEW_REQUIRED_HEADERS = ("VIN", "车系名称", "创建时间", "所属门店名称")
 # 旧版「车辆交付档案」
 OLD_REQUIRED_HEADERS = ("VIN", "交付日期", "交付门店")
 OLD_OPTIONAL_MAP = {
@@ -120,6 +120,8 @@ def parse_excel(path: Path) -> dict[str, Any]:
             "due_date": due_date_for(delivery, offset_days).isoformat(),
             "store": "",
             "store_code": "",
+            "delivery_store": "",
+            "delivery_store_code": "",
             "plate": "",
             "series": "",
             "series_name": "",
@@ -130,8 +132,11 @@ def parse_excel(path: Path) -> dict[str, Any]:
         if new_format:
             item.update(
                 {
-                    "store": _cell(row, idx, "交付门店名称") or _cell(row, idx, "所属门店名称"),
-                    "store_code": _cell(row, idx, "交付门店编码"),
+                    # 门店匹配只用所属门店，交付门店仅作展示参考
+                    "store": _cell(row, idx, "所属门店名称"),
+                    "store_code": _cell(row, idx, "所属门店编码"),
+                    "delivery_store": _cell(row, idx, "交付门店名称"),
+                    "delivery_store_code": _cell(row, idx, "交付门店编码"),
                     "plate": _cell(row, idx, "车牌号"),
                     "series_name": _cell(row, idx, "车系名称"),
                     "aftersales_series": _cell(row, idx, "售后车系"),
