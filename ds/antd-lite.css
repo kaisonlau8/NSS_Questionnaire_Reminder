@@ -219,6 +219,8 @@ h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.4; }
 }
 .brand .ai { color: var(--ant-brand); font-size: 18px; }
 .brand:hover { text-decoration: none; color: var(--ant-color-text); }
+/* 品牌 logo 图形（猛士白底顶栏用 logo-blue.png，深/蓝底用 logo-white.png） */
+.brand-logo { height: 28px; width: auto; display: block; }
 
 /* ---- 4.3 水平菜单 ---- */
 .ant-menu, .menu {
@@ -1129,9 +1131,10 @@ details.ant-tooltip-hint > summary::-webkit-details-marker { display: none; }
 .ant-page-footer a { color: #0958d9; display: inline-block; padding: 4px 2px; }
 .ant-page-footer a:hover { color: var(--ant-primary-active); }
 
-/* ---- 18.3 登录页（独立页面复用同一套 tokens / 组件） ---- */
+/* ---- 18.3 登录页（独立页面复用同一套 tokens / 组件；白卡片上用蓝色 logo） ---- */
 .ant-login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: var(--ant-space-4); }
 .ant-login-card { width: 100%; max-width: 360px; padding: var(--ant-space-6) var(--ant-space-5); margin-bottom: 0; }
+.ant-login-logo { height: 28px; width: auto; display: block; margin: 0 auto var(--ant-space-4); }
 .ant-login-card h1 {
   font-size: var(--ant-font-size-page-title);
   font-weight: 600;
@@ -1151,6 +1154,9 @@ details.ant-tooltip-hint > summary::-webkit-details-marker { display: none; }
    覆盖 360 / 390 / 414 常见宽度；导航汉堡在 4.6 节（<=860px）单独处理。
    ========================================================================== */
 @media (max-width: 768px) {
+  /* 品牌-logo 在窄屏收紧到 22px 高 */
+  .brand-logo { height: 22px; }
+
   /* 可点击控件最小高度 44px（热区；视觉字号不变） */
   .ant-btn, .btn,
   button:not(.burger),

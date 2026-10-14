@@ -52,9 +52,16 @@ app.jinja_env.globals["ds_css"] = lambda: _ds("antd-lite.css")
 app.jinja_env.globals["ds_sprite"] = lambda: _ds("sprite.svg")
 app.jinja_env.globals["ds_cards"] = lambda: _ds("cards.js")
 
+
+# --- 品牌静态资源（logo / favicon，design-system/sync.sh 同步到 ds/brand/）---
+@app.get("/ds/brand/<path:name>")
+def ds_brand(name: str):
+    from flask import send_from_directory
+    return send_from_directory(str(ROOT / "ds" / "brand"), name)
+
 # --- m-hero SSO (Casdoor): inert unless MHERO_AUTH[_NSS]=audit|on is set (see docs/SSO_CASDOOR.md) ---
 from mhero_auth.flask_adapter import init_app as _mhero_auth_init
-_mhero_auth_init(app, "nss", default_mode="off")
+_mhero_auth_init(app, "nss", default_mode="off", public_get_paths=["/ds/brand/*"])
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
 
