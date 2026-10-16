@@ -16,27 +16,31 @@ from nss.time_utils import beijing_strftime, ensure_beijing_tz
 ensure_beijing_tz()
 load_dotenv(ROOT / ".env")
 
-STORE_NAME_KEYS = ("门店名称", "交付门店", "门店", "店名", "用户中心")
-MANAGER_KEYS = ("门店服务经理", "服务经理", "售后服务经理", "服务顾问经理")
-SUPERVISOR_KEYS = ("服务督导", "督导", "区域督导", "售后督导")
+STORE_NAME_KEYS = ("店名称", "门店名称", "交付门店", "门店", "店名", "用户中心")
+MANAGER_KEYS = ("门店售后业务负责人", "门店服务经理", "服务经理", "售后服务经理", "服务顾问经理")
+SUPERVISOR_KEYS = ("督导", "服务督导", "督导姓名", "区域督导", "售后督导")
 REGION_KEYS = ("区域", "战区", "大区")
-CODE_KEYS = ("门店编码", "店代码", "编码")
+CODE_KEYS = ("店代码", "门店编码", "店代码", "编码")
 ALIAS_KEYS = ("门店全称", "原门店名称")
 PERSON_KEYS = ("督导", "督导姓名", "姓名", "提醒人", "人员")
 STORE_LINK_KEYS = ("门店", "负责门店", "门店名称", "交付门店")
-MANAGER_PHONE_KEYS = ("服务经理电话", "经理电话")
-SUPERVISOR_PHONE_KEYS = ("督导飞书电话号", "飞书电话号", "督导电话", "电话")
+MANAGER_PHONE_KEYS = ("售后业务负责人手机号", "服务经理电话", "经理电话")
+SUPERVISOR_PHONE_KEYS = ("督导手机号", "督导飞书电话号", "飞书电话号", "督导电话", "电话")
 
 
 def _bitable_ids() -> dict[str, str]:
     cfg = {
         "app_token": os.getenv("BITABLE_APP_TOKEN", "").strip(),
-        "store_table_id": os.getenv("BITABLE_STORE_TABLE_ID", "").strip(),
-        "store_view_id": os.getenv("BITABLE_STORE_VIEW_ID", "").strip(),
-        "supervisor_table_id": os.getenv("BITABLE_SUPERVISOR_TABLE_ID", "").strip(),
-        "supervisor_view_id": os.getenv("BITABLE_SUPERVISOR_VIEW_ID", "").strip(),
+        "table_id": (
+            os.getenv("BITABLE_TABLE_ID", "").strip()
+            or os.getenv("BITABLE_STORE_TABLE_ID", "").strip()
+        ),
+        "view_id": (
+            os.getenv("BITABLE_VIEW_ID", "").strip()
+            or os.getenv("BITABLE_STORE_VIEW_ID", "").strip()
+        ),
     }
-    missing = [k for k, v in cfg.items() if not v and not k.endswith("view_id")]
+    missing = [k for k in ("app_token", "table_id") if not cfg[k]]
     if missing:
         raise RuntimeError("缺少多维表配置: " + ", ".join(missing))
     return cfg
@@ -194,7 +198,10 @@ def records_to_stores(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             _people_from_text(_pick_field(fields, MANAGER_KEYS)),
             field_text(_pick_field(fields, MANAGER_PHONE_KEYS)),
         )
-        supervisors = _people_from_text(_pick_field(fields, SUPERVISOR_KEYS))
+        supervisors = _attach_phone(
+            _people_from_text(_pick_field(fields, SUPERVISOR_KEYS)),
+            field_text(_pick_field(fields, SUPERVISOR_PHONE_KEYS)),
+        )
         stores.append(
             {
                 "name": name,
@@ -293,15 +300,42 @@ def known_people() -> list[dict[str, str]]:
     return list(by_name.values())
 
 
+def _supervisors_from_stores(stores: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """督导不再单独一张表，从门店行的督导联系人汇总。"""
+    by_key: dict[str, dict[str, Any]] = {}
+    for store in stores:
+        for person in store.get("supervisors") or []:
+            key = str(person.get("open_id") or person.get("name") or "").strip()
+            if not key:
+                continue
+            row = by_key.get(key)
+            if row is None:
+                row = {
+                    "people": [person],
+                    "stores": [],
+                    "region": str(store.get("region") or ""),
+                }
+                by_key[key] = row
+            name = str(store.get("name") or "").strip()
+            if name and name not in row["stores"]:
+                row["stores"].append(name)
+    return list(by_key.values())
+
+
 def sync_all() -> dict[str, Any]:
     cfg = _bitable_ids()
-    store_fields = [f.get("field_name") for f in fetch_fields(cfg["store_table_id"])]
-    supervisor_fields = [f.get("field_name") for f in fetch_fields(cfg["supervisor_table_id"])]
-    store_records = fetch_records(cfg["store_table_id"], cfg["store_view_id"])
-    supervisor_records = fetch_records(cfg["supervisor_table_id"], cfg["supervisor_view_id"])
+    store_fields = [f.get("field_name") for f in fetch_fields(cfg["table_id"])]
+    store_records = fetch_records(cfg["table_id"], cfg["view_id"])
     stores = records_to_stores(store_records)
-    supervisors = records_to_supervisors(supervisor_records)
+    supervisors = _supervisors_from_stores(stores)
     resolved = resolve_people_open_ids(stores, supervisors)
+    missing_managers = [
+        f"{store.get('code') or ''} {store.get('name') or ''}".strip()
+        for store in stores
+        if not any((p.get("open_id") or p.get("phone")) for p in (store.get("managers") or []))
+    ]
+    for label in missing_managers:
+        print(f"[nss-sync] 无售后负责人，该店到期车不发给服务经理: {label}")
     synced_at = beijing_strftime("%Y-%m-%d %H:%M:%S")
     save_json(
         STORES_PATH,
@@ -312,7 +346,7 @@ def sync_all() -> dict[str, Any]:
         {
             "synced_at": synced_at,
             "count": len(supervisors),
-            "fields": supervisor_fields,
+            "source": "store-rows",
             "supervisors": supervisors,
         },
     )
@@ -321,8 +355,8 @@ def sync_all() -> dict[str, Any]:
         "synced_at": synced_at,
         "store_count": len(stores),
         "supervisor_count": len(supervisors),
+        "missing_manager_count": len(missing_managers),
         "store_fields": store_fields,
-        "supervisor_fields": supervisor_fields,
         "resolved_open_ids": resolved,
     }
     save_json(SYNC_STATE_PATH, result)

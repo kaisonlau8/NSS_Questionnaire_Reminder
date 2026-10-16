@@ -17,7 +17,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
-from nss.bitable import known_people, load_stores, load_supervisors, load_sync_state, sync_all  # noqa: E402
+from nss.bitable import load_stores, load_supervisors, load_sync_state, sync_all  # noqa: E402
+from nss.eligibility import ineligible_reason  # noqa: E402
 from nss.matching import enrich_vehicle  # noqa: E402
 from nss.paths import UPLOAD_DIR, ensure_dirs  # noqa: E402
 from nss.reminder import recent_logs, recipients_for, run_reminders, sent_today_count  # noqa: E402
@@ -36,47 +37,70 @@ ensure_beijing_tz()
 ensure_dirs()
 
 app = Flask(__name__, template_folder=str(ROOT / "templates"))
+
+# --- 设计系统（antd-lite.css / sprite.svg，由 design-system/sync.sh 同步到 ds/）---
+_ds_cache: dict[str, str] = {}
+
+
+def _ds(name: str) -> str:
+    if name not in _ds_cache:
+        _ds_cache[name] = (ROOT / "ds" / name).read_text(encoding="utf-8")
+    return _ds_cache[name]
+
+
+app.jinja_env.globals["ds_css"] = lambda: _ds("antd-lite.css")
+app.jinja_env.globals["ds_sprite"] = lambda: _ds("sprite.svg")
+app.jinja_env.globals["ds_cards"] = lambda: _ds("cards.js")
+
+
+# --- 品牌静态资源（logo / favicon，design-system/sync.sh 同步到 ds/brand/）---
+@app.get("/ds/brand/<path:name>")
+def ds_brand(name: str):
+    from flask import send_from_directory
+    return send_from_directory(str(ROOT / "ds" / "brand"), name)
+
+# --- m-hero SSO (Casdoor): inert unless MHERO_AUTH[_NSS]=audit|on is set (see docs/SSO_CASDOOR.md) ---
+from mhero_auth.flask_adapter import init_app as _mhero_auth_init
+_mhero_auth_init(app, "nss", default_mode="off", public_get_paths=["/ds/brand/*"])
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 
 
-def _resolve_recipients(items: list) -> list[dict[str, str]]:
-    known = {p["name"]: p.get("open_id") or "" for p in known_people() if p.get("name")}
-    current = {p["name"]: p.get("open_id") or "" for p in load_settings().get("national_recipients") or []}
-    out: list[dict[str, str]] = []
-    for item in items:
-        if isinstance(item, str):
-            name = item.strip()
-            open_id = ""
-        elif isinstance(item, dict):
-            name = str(item.get("name") or "").strip()
-            open_id = str(item.get("open_id") or "").strip()
-        else:
-            continue
-        if not name:
-            continue
-        if not open_id:
-            open_id = current.get(name) or known.get(name) or ""
-        out.append({"name": name, "open_id": open_id})
-    return out
+def _directory_rows() -> list[dict]:
+    rows = []
+    for store in load_stores():
+        managers = store.get("managers") or []
+        supervisors = store.get("supervisors") or []
+        manager = managers[0] if managers else {}
+        supervisor = supervisors[0] if supervisors else {}
+        rows.append({
+            "code": store.get("code") or "",
+            "name": store.get("name") or "",
+            "region": store.get("region") or "",
+            "supervisor": supervisor.get("name") or "",
+            "manager": manager.get("name") or "",
+            "manager_ok": bool(manager.get("open_id") or manager.get("phone")),
+        })
+    rows.sort(key=lambda item: (item["region"], item["code"], item["name"]))
+    return rows
 
 
 def _status_payload() -> dict:
     settings = load_settings()
     meta = vehicles_meta()
     due = [enrich_vehicle(v) for v in load_vehicles() if v.get("due_date") == beijing_today().isoformat()]
-    unresolved = [p for p in settings.get("national_recipients") or [] if not p.get("open_id")]
     return {
         "now": beijing_strftime("%Y-%m-%d %H:%M:%S"),
         "vehicles": meta,
         "store_count": len(load_stores()),
         "supervisor_count": len(load_supervisors()),
+        "stores": _directory_rows(),
         "sync": load_sync_state(),
         "due_today": len(due),
         "due_unmatched": sum(1 for v in due if v.get("unmatched")),
+        "due_excluded": sum(1 for v in due if ineligible_reason(v, settings)),
         "sent_today": sent_today_count(),
         "next_due_date": next_due_date(),
         "settings": settings,
-        "unresolved_nationals": unresolved,
         "scheduler": scheduler_status(),
         "app_id": os.getenv("APP_ID", ""),
     }
@@ -99,6 +123,7 @@ def api_due():
         day = datetime.strptime(raw, "%Y-%m-%d").date()
     except ValueError:
         return jsonify({"ok": False, "error": "日期格式应为 YYYY-MM-DD"}), 400
+    settings = load_settings()
     items = []
     for vehicle in load_vehicles():
         if vehicle.get("due_date") != day.isoformat():
@@ -108,6 +133,7 @@ def api_due():
             {
                 **enriched,
                 "recipients": recipients_for(enriched),
+                "excluded_reason": ineligible_reason(enriched, settings),
             }
         )
     return jsonify({"ok": True, "date": day.isoformat(), "count": len(items), "items": items})
@@ -142,13 +168,6 @@ def api_sync():
 @app.post("/api/settings")
 def api_settings():
     body = request.get_json(silent=True) or {}
-    if "national_names" in body:
-        names = body.get("national_names")
-        if isinstance(names, str):
-            names = [line.strip() for line in names.splitlines() if line.strip()]
-        body["national_recipients"] = _resolve_recipients(names)
-    elif "national_recipients" in body:
-        body["national_recipients"] = _resolve_recipients(body.get("national_recipients") or [])
     settings = save_settings(body)
     return jsonify({"ok": True, "settings": settings})
 

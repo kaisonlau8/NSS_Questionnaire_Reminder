@@ -1,11 +1,11 @@
-"""按交付日 +90 天发送 NSS 问卷私聊。"""
+"""按创建时间（交付日）+90 天发送 NSS 问卷私聊，发给门店服务经理与对应督导。"""
 
 from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
 
-from nss.bitable import known_people
+from nss.eligibility import ineligible_reason, mask_vin
 from nss.feishu_client import send_text_message
 from nss.jsonutil import load_json, save_json
 from nss.matching import enrich_vehicle
@@ -20,7 +20,7 @@ def build_message(vehicle: dict[str, Any]) -> str:
         f"VIN：{vehicle.get('vin') or ''}",
         f"交付日期：{vehicle.get('delivery_date') or ''}",
         f"车牌号：{vehicle.get('plate') or ''}",
-        f"车系：{vehicle.get('series') or ''}",
+        f"车系：{vehicle.get('series_name') or vehicle.get('series') or ''}",
         f"车型：{vehicle.get('model') or ''}",
         f"交付门店：{vehicle.get('store') or ''}",
         f"门店服务经理：{vehicle.get('manager_name') or ''}",
@@ -47,40 +47,29 @@ def already_sent(vin: str, due_date: str) -> bool:
     return _sent_key(vin, due_date) in keys
 
 
-def resolve_national() -> list[dict[str, str]]:
-    known = {p["name"]: p for p in known_people() if p.get("name")}
-    out: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item in load_settings().get("national_recipients") or []:
-        name = str(item.get("name") or "").strip()
-        open_id = str(item.get("open_id") or "").strip()
-        if not open_id and name in known:
-            open_id = known[name].get("open_id") or ""
-        key = open_id or name
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        out.append({"name": name, "open_id": open_id, "role": "national"})
-    return out
-
-
 def recipients_for(vehicle: dict[str, Any]) -> list[dict[str, str]]:
-    people: list[dict[str, str]] = []
-    seen: set[str] = set()
+    """收件人 = 门店服务经理 + 该门店/区域督导；先经理后督导，按 open_id（缺失时按姓名）去重。
 
-    def _add(items: list[dict[str, str]], role: str) -> None:
-        for item in items:
+    同一人既是经理又是督导只发一条（role 记为 manager）；不含全国收件人。
+    """
+    people: list[dict[str, str]] = []
+    seen_open_ids: set[str] = set()
+    seen_names: set[str] = set()
+    for role, field in (("manager", "managers"), ("supervisor", "supervisors")):
+        for item in vehicle.get(field) or []:
             name = str(item.get("name") or "").strip()
             open_id = str(item.get("open_id") or "").strip()
-            key = open_id or f"{role}:{name}"
-            if not key or key in seen:
+            if not name and not open_id:
                 continue
-            seen.add(key)
+            if open_id and open_id in seen_open_ids:
+                continue
+            if name and name in seen_names:
+                continue
+            if open_id:
+                seen_open_ids.add(open_id)
+            if name:
+                seen_names.add(name)
             people.append({"name": name, "open_id": open_id, "role": role})
-
-    _add(vehicle.get("managers") or [], "manager")
-    _add(vehicle.get("supervisors") or [], "supervisor")
-    _add(resolve_national(), "national")
     return people
 
 
@@ -115,27 +104,34 @@ def parse_day(value: str | None) -> date:
 
 def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool = False) -> dict[str, Any]:
     target = parse_day(day)
+    settings = load_settings()
     due = [enrich_vehicle(v) for v in due_on(target)]
     results: list[dict[str, Any]] = []
     sent = 0
     skipped = 0
     failed = 0
     unmatched = 0
+    excluded = 0
+    excluded_by: dict[str, int] = {}
 
     for vehicle in due:
-        if vehicle.get("skipped"):
-            item = {
-                "vin": vehicle.get("vin"),
-                "store": vehicle.get("store"),
-                "unmatched": False,
-                "recipients": [],
-                "message": "",
-                "actions": [],
-                "status": "skipped_store",
-                "skip_reason": vehicle.get("skip_reason") or "",
-            }
-            skipped += 1
-            results.append(item)
+        reason = ineligible_reason(vehicle, settings)
+        if reason:
+            excluded += 1
+            excluded_by[reason] = excluded_by.get(reason, 0) + 1
+            results.append(
+                {
+                    "vin": vehicle.get("vin"),
+                    "store": vehicle.get("store"),
+                    "unmatched": False,
+                    "recipients": [],
+                    "message": "",
+                    "actions": [],
+                    "status": "excluded",
+                    "skip_reason": reason,
+                }
+            )
+            print(f"[nss] 已排除 {mask_vin(vehicle.get('vin'))}：{reason}")
             continue
         if vehicle.get("unmatched"):
             unmatched += 1
@@ -145,6 +141,7 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
             "vin": vehicle.get("vin"),
             "store": vehicle.get("store"),
             "unmatched": bool(vehicle.get("unmatched")),
+            "match_method": vehicle.get("match_method") or ("none" if vehicle.get("unmatched") else ""),
             "recipients": recs,
             "message": text,
             "actions": [],
@@ -180,7 +177,7 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
         else:
             item["status"] = "failed"
             if not errors:
-                errors.append("没有可发送的收件人")
+                errors.append("门店未匹配，无服务经理/督导" if vehicle.get("unmatched") else "没有可发送的收件人")
         item["errors"] = errors
         results.append(item)
 
@@ -193,6 +190,8 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
         "skipped": skipped,
         "failed": failed,
         "unmatched": unmatched,
+        "excluded": excluded,
+        "excluded_by": excluded_by,
         "at": beijing_strftime("%Y-%m-%d %H:%M:%S"),
         "items": results,
     }
@@ -206,6 +205,8 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
             "skipped": skipped,
             "failed": failed,
             "unmatched": unmatched,
+            "excluded": excluded,
+            "excluded_by": excluded_by,
         }
     )
     return summary
