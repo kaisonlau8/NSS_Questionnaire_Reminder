@@ -17,6 +17,8 @@
     .nss-meta { margin-left: auto; font-size: var(--ant-font-size-table); color: var(--ant-color-text-tertiary); white-space: nowrap; }
     /* 顶栏说明文字与统一汉堡同一断点（<=860px）隐藏 */
     @media (max-width: 860px) { .nss-meta { display: none; } }
+    /* ---- Spin 结构兜底：嵌套加载容器内的 .ant-spin 仅在 spinning 时显示（防常显） ---- */
+    .ant-spin-nested-loading .ant-spin:not(.ant-spin-spinning) { display: none; }
     /* ---- 双文件导入（ant-upload-drag 风格，蓝/白） ---- */
     .dual-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .dual-slot { border: 1px dashed var(--ant-primary); border-radius: 8px; background: #fff;
@@ -27,6 +29,7 @@
     .dual-slot .s { font-size: 12px; margin-top: 4px; color: rgba(0,0,0,.45); }
     .dual-slot-icon { width: 26px; height: 26px; font-size: 26px; color: var(--ant-primary); }
     .dual-slot-file { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; color: var(--ant-primary); }
+    .dual-slot-file[hidden], .dual-zone [hidden] { display: none !important; }
     .dual-slot-file .name { color: var(--ant-color-text, rgba(0,0,0,.88)); max-width: 75%;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dual-slot-rm { border: 0; background: transparent; padding: 2px; line-height: 0; cursor: pointer; color: rgba(0,0,0,.45); }
@@ -46,7 +49,6 @@
 
   <div class="container">
     <div id="page-spin" class="ant-spin-nested-loading">
-    <div>
       <div class="ant-spin ant-spin-lg ant-spin-spinning ant-spin-show-text" role="status">
         <span class="ant-spin-dot ant-spin-dot-spin" aria-hidden="true">
           <i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i>
@@ -159,14 +161,13 @@
       </div>
       <p class="muted ant-mt-2" id="run-hint"></p>
       <div id="due-spin" class="ant-spin-nested-loading">
-        <div>
-          <div class="ant-spin ant-spin-show-text" role="status" aria-hidden="true">
-            <span class="ant-spin-dot ant-spin-dot-spin" aria-hidden="true">
-              <i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i>
-            </span>
-            <div class="ant-spin-text">加载中…</div>
-          </div>
-          <div class="ant-spin-container">
+        <div class="ant-spin ant-spin-show-text" role="status" aria-hidden="true">
+          <span class="ant-spin-dot ant-spin-dot-spin" aria-hidden="true">
+            <i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i>
+          </span>
+          <div class="ant-spin-text">加载中…</div>
+        </div>
+        <div class="ant-spin-container">
       <div class="tw ant-table-wrap"><table><thead>
           <tr><th data-card-title>VIN</th><th>交付日期</th><th>门店</th><th>服务经理</th><th>收件人</th><th>匹配</th></tr>
         </thead>
@@ -174,7 +175,6 @@
           <tr><td colspan="6" class="muted">加载中…</td></tr>
         </tbody>
       </table></div>
-          </div>
         </div>
       </div>
       </div>
@@ -191,7 +191,6 @@
 
     <footer class="ant-page-footer" style="text-align:center">猛士科技 服务运营 — NSS 问卷提醒 · 端口 9005</footer>
       </div>
-    </div>
     </div>
   </div>
   <div id="ant-message" class="ant-message" aria-live="polite" aria-relevant="additions"></div>
@@ -237,8 +236,8 @@
     }
     function setSpin(host, spinning) {
       if (!host) return;
-      const spin = host.querySelector(":scope > div > .ant-spin");
-      const body = host.querySelector(":scope > div > .ant-spin-container");
+      const spin = host.querySelector(":scope > .ant-spin");
+      const body = host.querySelector(":scope > .ant-spin-container");
       if (!spin || !body) return;
       spin.classList.toggle("ant-spin-spinning", !!spinning);
       body.classList.toggle("ant-spin-blur", !!spinning);
