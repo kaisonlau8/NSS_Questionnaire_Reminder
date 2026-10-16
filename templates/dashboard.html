@@ -15,7 +15,8 @@
     .ant-header .in { max-width: 1080px; }
     .container { max-width: 1080px; }
     .nss-meta { margin-left: auto; font-size: var(--ant-font-size-table); color: var(--ant-color-text-tertiary); white-space: nowrap; }
-    @media (max-width: 768px) { .nss-meta { display: none; } }
+    /* 顶栏说明文字与统一汉堡同一断点（<=860px）隐藏 */
+    @media (max-width: 860px) { .nss-meta { display: none; } }
     /* ---- Spin 结构兜底：嵌套加载容器内的 .ant-spin 仅在 spinning 时显示（防常显） ---- */
     .ant-spin-nested-loading .ant-spin:not(.ant-spin-spinning) { display: none; }
     /* ---- 双文件导入（ant-upload-drag 风格，蓝/白） ---- */
