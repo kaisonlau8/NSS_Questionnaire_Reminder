@@ -1,4 +1,7 @@
-"""按创建时间（交付日）+90 天发送 NSS 问卷私聊，发给门店服务经理与对应督导。"""
+"""按创建时间（交付日）+89 天发送 NSS 问卷私聊，发给门店服务经理与对应督导。
+
+提醒日比问卷早一天：交付日后第 89 天提醒，满意度调研问卷在次日到达。
+"""
 
 from __future__ import annotations
 
@@ -24,7 +27,7 @@ def build_message(vehicle: dict[str, Any]) -> str:
         f"车型：{vehicle.get('model') or ''}",
         f"交付门店：{vehicle.get('store') or ''}",
         f"门店服务经理：{vehicle.get('manager_name') or ''}",
-        "该车辆会在今日收到 NSS 问卷，请及时跟进！",
+        "该用户明天将会收到 NSS 满意度调研问卷，请及时跟进！",
     ]
     return "\n".join(lines)
 

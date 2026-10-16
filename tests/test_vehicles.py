@@ -43,7 +43,7 @@ def row(vin, series="全新M817", data_type="客户", created="2026-07-17",
 
 @pytest.fixture(autouse=True)
 def patch_settings(monkeypatch):
-    monkeypatch.setattr(vehicles_mod, "load_settings", lambda: {"offset_days": 90})
+    monkeypatch.setattr(vehicles_mod, "load_settings", lambda: {"offset_days": 89})
 
 
 def make_xlsx(path, rows, sheet="客户车辆关系20261013", headers=HEADERS):
@@ -57,14 +57,14 @@ def make_xlsx(path, rows, sheet="客户车辆关系20261013", headers=HEADERS):
     return path
 
 
-def test_due_date_is_created_plus_90(tmp_path):
+def test_due_date_is_created_plus_89(tmp_path):
     path = make_xlsx(tmp_path / "cars.xlsx", [row("LSVNEW000000001", created="2026-07-17")])
     parsed = parse_excel(path)
     assert parsed["stats"] == {"total": 1, "imported": 1, "skipped_no_date": 0, "duplicates": 0}
     vehicle = parsed["vehicles"][0]
     assert vehicle["vin"] == "LSVNEW000000001"
     assert vehicle["delivery_date"] == "2026-07-17"
-    assert vehicle["due_date"] == (date(2026, 7, 17) + timedelta(days=90)).isoformat()
+    assert vehicle["due_date"] == (date(2026, 7, 17) + timedelta(days=89)).isoformat()
     # 门店取所属门店，不取交付门店
     assert vehicle["store"] == "猛士汽车北京朝阳用户中心"
     assert vehicle["store_code"] == "SS001"
@@ -211,7 +211,7 @@ def test_old_format_still_accepted(tmp_path):
     vehicle = parsed["vehicles"][0]
     assert vehicle["vin"] == "LSVOLD0000000001"
     assert vehicle["delivery_date"] == "2026-01-01"
-    assert vehicle["due_date"] == due_date_for(date(2026, 1, 1), 90).isoformat()
+    assert vehicle["due_date"] == due_date_for(date(2026, 1, 1), 89).isoformat()
     assert vehicle["store"] == "猛士汽车北京交付中心"
     assert vehicle["series"] == "M817"
     assert vehicle["store_code"] == ""
