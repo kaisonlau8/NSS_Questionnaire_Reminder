@@ -16,6 +16,24 @@
     .container { max-width: 1080px; }
     .nss-meta { margin-left: auto; font-size: var(--ant-font-size-table); color: var(--ant-color-text-tertiary); white-space: nowrap; }
     @media (max-width: 768px) { .nss-meta { display: none; } }
+    /* ---- 双文件导入（ant-upload-drag 风格，蓝/白） ---- */
+    .dual-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .dual-slot { border: 1px dashed var(--ant-primary); border-radius: 8px; background: #fff;
+      padding: 18px 12px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; }
+    .dual-slot:hover, .dual-slot:focus-visible, .dual-slot.dragover { background: var(--ant-primary-bg); }
+    .dual-slot.dragover { border-style: solid; }
+    .dual-slot .t { font-size: 14px; font-weight: 600; margin-top: 6px; color: var(--ant-color-text, rgba(0,0,0,.88)); }
+    .dual-slot .s { font-size: 12px; margin-top: 4px; color: rgba(0,0,0,.45); }
+    .dual-slot-icon { width: 26px; height: 26px; font-size: 26px; color: var(--ant-primary); }
+    .dual-slot-file { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; color: var(--ant-primary); }
+    .dual-slot-file .name { color: var(--ant-color-text, rgba(0,0,0,.88)); max-width: 75%;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dual-slot-rm { border: 0; background: transparent; padding: 2px; line-height: 0; cursor: pointer; color: rgba(0,0,0,.45); }
+    .dual-slot-rm:hover { color: rgba(0,0,0,.88); }
+    .dual-sum-row { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 13px; }
+    .dual-sum-label { color: rgba(0,0,0,.65); }
+    .dual-sum-row .ant-tag { max-width: 100%; overflow-wrap: anywhere; }
+    @media (max-width: 768px) { .dual-slots { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -66,12 +84,40 @@
     </div>
 
     <div class="ant-card">
-      <div class="ant-card-head"><h2 class="ant-card-head-title">上传车辆档案</h2></div>
+      <div class="ant-card-head"><h2 class="ant-card-head-title">导入车辆档案（双文件）</h2></div>
       <div class="ant-card-body">
-      <p class="muted">新版「客户车辆关系」导出。模板列：VIN、车系名称、售后车系、车型名称、车牌号、数据类型、创建时间（交付日期）、交付门店名称/编码、所属门店名称/编码。上传后整表覆盖本地档案；创建时间为空的行跳过，用车人/车主个人信息不落库。</p>
-      <div class="ant-flex">
-        <input type="file" id="excel" accept=".xlsx">
-        <button class="ant-btn ant-btn-primary" id="btn-upload" type="button" onclick="uploadExcel()"><svg class="ai" aria-hidden="true"><use href="#i-upload"/></svg>上传并导入</button>
+      <p class="muted">两份导出按 VIN 关联：① 客户车辆关系（DMS 导出数据）提供所属门店/车牌/车系；② 车辆交付明细（数据门户导出数据）提供交付时间（决定 89 天到期日）。可一次拖入两份 .xlsx，未交付或仅出现在单份表的车辆不会导入；个人信息不落库。</p>
+      <div class="dual-slots" id="dual-slots">
+        <div class="dual-slot" id="slot-relation" role="button" tabindex="0" aria-label="选择①客户车辆关系文件">
+          <input type="file" id="file-relation" accept=".xlsx" hidden>
+          <div class="dual-slot-empty" id="empty-relation">
+            <svg class="ai dual-slot-icon" aria-hidden="true"><use href="#i-upload"/></svg>
+            <div class="t">① 客户车辆关系（DMS 导出数据）</div>
+            <div class="s">点击选择或拖入 .xlsx</div>
+          </div>
+          <div class="dual-slot-file" id="picked-relation" hidden>
+            <svg class="ai" aria-hidden="true"><use href="#i-file-excel"/></svg>
+            <span class="name"></span>
+            <button class="dual-slot-rm" type="button" data-slot="relation" aria-label="移除文件"><svg class="ai" aria-hidden="true"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+        <div class="dual-slot" id="slot-delivery" role="button" tabindex="0" aria-label="选择②车辆交付明细文件">
+          <input type="file" id="file-delivery" accept=".xlsx" hidden>
+          <div class="dual-slot-empty" id="empty-delivery">
+            <svg class="ai dual-slot-icon" aria-hidden="true"><use href="#i-upload"/></svg>
+            <div class="t">② 车辆交付明细（数据门户导出数据）</div>
+            <div class="s">点击选择或拖入 .xlsx</div>
+          </div>
+          <div class="dual-slot-file" id="picked-delivery" hidden>
+            <svg class="ai" aria-hidden="true"><use href="#i-file-excel"/></svg>
+            <span class="name"></span>
+            <button class="dual-slot-rm" type="button" data-slot="delivery" aria-label="移除文件"><svg class="ai" aria-hidden="true"><use href="#i-close"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="ant-flex ant-mt-2" style="flex-wrap:wrap">
+        <button class="ant-btn ant-btn-primary" id="btn-upload" type="button" onclick="uploadDual()" disabled><svg class="ai" aria-hidden="true"><use href="#i-upload"/></svg>上传并导入</button>
+        <button class="ant-btn" id="btn-dual-clear" type="button" onclick="clearDual()"><svg class="ai" aria-hidden="true"><use href="#i-close"/></svg>清空</button>
       </div>
       <div id="upload-progress" class="ant-upload-list ant-upload-list-text" hidden>
         <div class="ant-upload-list-item">
@@ -87,6 +133,7 @@
           </div>
         </div>
       </div>
+      <div id="dual-summary" class="ant-mt-2" hidden></div>
       <p class="muted ant-mt-2" id="upload-hint"></p>
       </div>
     </div>
@@ -374,42 +421,160 @@
         if (dueSpin) setSpin(document.getElementById("due-spin"), false);
       }
     }
-    async function uploadExcel() {
-      const input = document.getElementById("excel");
-      const file = input.files && input.files[0];
+    const dual = { relation: null, delivery: null };
+    const SLOT_LABEL = { relation: "① 客户车辆关系（DMS 导出数据）", delivery: "② 车辆交付明细（数据门户导出数据）" };
+    function slotForName(name) {
+      if (/客户车辆关系|关系/.test(name)) return "relation";
+      if (/预订订单|交付|明细/.test(name)) return "delivery";
+      return "";
+    }
+    function firstEmptySlot() {
+      return !dual.relation ? "relation" : (!dual.delivery ? "delivery" : "");
+    }
+    function setSlot(slot, file) {
+      if (!slot || !file) return;
+      dual[slot] = file;
+      document.getElementById("picked-" + slot).querySelector(".name").textContent = file.name;
+      document.getElementById("picked-" + slot).hidden = false;
+      document.getElementById("empty-" + slot).hidden = true;
+      document.getElementById("slot-" + slot).classList.add("dual-slot-filled");
+      updateDualUI();
+    }
+    function clearSlot(slot) {
+      dual[slot] = null;
+      document.getElementById("picked-" + slot).hidden = true;
+      document.getElementById("empty-" + slot).hidden = false;
+      document.getElementById("slot-" + slot).classList.remove("dual-slot-filled");
+      const input = document.getElementById("file-" + slot);
+      if (input) input.value = "";
+      updateDualUI();
+    }
+    function clearDual() {
+      clearSlot("relation");
+      clearSlot("delivery");
+      document.getElementById("dual-summary").hidden = true;
+      document.getElementById("upload-progress").hidden = true;
+      document.getElementById("upload-hint").textContent = "";
+    }
+    function updateDualUI() {
+      const btn = document.getElementById("btn-upload");
+      btn.disabled = !(dual.relation && dual.delivery);
+      btn.title = btn.disabled ? "请先放入两份 Excel 文件" : "";
+    }
+    function handleDualFiles(fileList) {
+      const all = Array.from(fileList || []);
+      const bad = all.filter(f => !/\.xlsx$/i.test(f.name));
+      if (bad.length) showMessage("warning", "只接受 .xlsx 文件：" + bad.map(f => f.name).join("、"));
+      const files = all.filter(f => /\.xlsx$/i.test(f.name));
+      if (!files.length) return;
+      const placed = new Set();
+      const taken = new Set();
+      for (const f of files) {
+        const t = slotForName(f.name);
+        if (t && !taken.has(t)) { setSlot(t, f); taken.add(t); placed.add(f); }
+      }
+      for (const f of files) {
+        if (placed.has(f)) continue;
+        const t = firstEmptySlot();
+        if (!t) { showMessage("warning", "已忽略多余文件：" + f.name); continue; }
+        setSlot(t, f);
+        taken.add(t);
+        placed.add(f);
+      }
+    }
+    function wireDualSlot(slot) {
+      const zone = document.getElementById("slot-" + slot);
+      const input = document.getElementById("file-" + slot);
+      zone.addEventListener("click", function (e) {
+        if (e.target.closest(".dual-slot-rm") || e.target === input) return;
+        input.click();
+      });
+      zone.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); }
+      });
+      input.addEventListener("change", function () {
+        if (input.files && input.files[0]) setSlot(slot, input.files[0]);
+      });
+      zone.querySelector(".dual-slot-rm").addEventListener("click", function (e) {
+        e.stopPropagation();
+        clearSlot(slot);
+      });
+      for (const evt of ["dragenter", "dragover"]) {
+        zone.addEventListener(evt, function (e) { e.preventDefault(); e.stopPropagation(); zone.classList.add("dragover"); });
+      }
+      for (const evt of ["dragleave", "drop"]) {
+        zone.addEventListener(evt, function (e) { e.preventDefault(); e.stopPropagation(); zone.classList.remove("dragover"); });
+      }
+      zone.addEventListener("drop", function (e) {
+        e.preventDefault();
+        handleDualFiles(e.dataTransfer && e.dataTransfer.files);
+      });
+    }
+    wireDualSlot("relation");
+    wireDualSlot("delivery");
+    function renderDualSummary(st) {
+      const host = document.getElementById("dual-summary");
+      host.hidden = false;
+      host.textContent = "";
+      const unk = st.unknown_store_codes || {};
+      const dc = st.date_changed || {};
+      const pd = st.past_due_unsent || {};
+      const rows = [
+        ["匹配导入", (st.matched ?? 0) + " 台", (st.matched ?? 0) > 0 ? "success" : "warning"],
+        ["仅关系表（未导入）", String(st.only_in_relation ?? 0), (st.only_in_relation ?? 0) > 0 ? "warning" : "default"],
+        ["仅交付明细（未导入）", String(st.only_in_delivery ?? 0), (st.only_in_delivery ?? 0) > 0 ? "warning" : "default"],
+        ["重复 VIN", String(st.duplicates ?? 0), "default"],
+        ["未知门店编码", unk.count ? unk.count + "：" + (unk.examples || []).join("、") : "0", unk.count ? "error" : "default"],
+        ["交付日期变更", dc.count ? dc.count + "：" + (dc.examples || []).map(x => `${x.vin} ${x.old}→${x.new}`).join("；") : "0", dc.count ? "warning" : "default"],
+        ["已过期未发送", pd.count ? pd.count + "：" + (pd.examples || []).map(x => `${x.vin}（${x.due_date} 到期）`).join("、") : "0", pd.count ? "error" : "default"],
+      ];
+      for (const [label, value, tone] of rows) {
+        const line = document.createElement("div");
+        line.className = "dual-sum-row";
+        const name = document.createElement("span");
+        name.className = "dual-sum-label";
+        name.textContent = label + "：";
+        const tag = document.createElement("span");
+        tag.className = tone === "default" ? "ant-tag" : "ant-tag ant-tag-" + tone;
+        tag.textContent = value;
+        line.append(name, tag);
+        host.appendChild(line);
+      }
+    }
+    async function uploadDual() {
       const hint = document.getElementById("upload-hint");
-      if (!file) {
-        hint.textContent = "请先选择文件";
-        showMessage("warning", "请先选择文件");
+      const rel = dual.relation, del = dual.delivery;
+      if (!rel || !del) {
+        hint.textContent = "请先放入两份 Excel 文件";
+        showMessage("warning", "请先放入①客户车辆关系和②车辆交付明细两份文件");
         return;
       }
       await withLoading(document.getElementById("btn-upload"), function () {
         return new Promise(function (resolve) {
-          input.disabled = true;
-          renderUpload(file.name, 0, "active");
+          const label = rel.name + " + " + del.name;
+          renderUpload(label, 0, "active");
           const fd = new FormData();
-          fd.append("file", file);
+          fd.append("relation", rel);
+          fd.append("delivery", del);
           const xhr = new XMLHttpRequest();
-          xhr.open("POST", "/api/upload");
+          xhr.open("POST", "/api/upload-dual");
           xhr.upload.onprogress = function (e) {
-            if (e.lengthComputable) renderUpload(file.name, (e.loaded / e.total) * 100, "active");
+            if (e.lengthComputable) renderUpload(label, (e.loaded / e.total) * 100, "active");
           };
           function finish(err, data) {
-            input.disabled = false;
             if (err) {
-              renderUpload(file.name, 100, "exception");
+              renderUpload(label, 100, "exception");
               hint.textContent = err;
               showMessage("error", err);
               resolve();
               return;
             }
-            const st = data.stats;
-            const text = st
-              ? `已导入 ${data.count} 台 · 无创建时间跳过 ${st.skipped_no_date} · 重复 VIN ${st.duplicates}`
-              : `已导入 ${data.count} 台 · ${data.imported_at}`;
-            renderUpload(file.name, 100, "success");
+            const st = data.stats || {};
+            renderUpload(label, 100, "success");
+            const text = `匹配导入 ${data.count} 台 · 仅关系表 ${st.only_in_relation ?? 0} · 仅交付明细 ${st.only_in_delivery ?? 0}`;
             hint.textContent = text;
             showNotification("success", "导入完成", text);
+            renderDualSummary(st);
             refreshAll().catch(function (e) { showMessage("error", e.message); }).then(resolve);
           }
           xhr.onerror = function () { finish("上传失败"); };
