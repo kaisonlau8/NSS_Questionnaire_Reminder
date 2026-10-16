@@ -9,7 +9,7 @@ from nss.jsonutil import load_json, save_json
 from nss.paths import SETTINGS_EXAMPLE_PATH, SETTINGS_PATH
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "offset_days": 90,
+    "offset_days": 89,
     "remind_hour": 9,
     "remind_minute": 0,
     "scheduler_enabled": True,
@@ -46,9 +46,9 @@ def load_settings() -> dict[str, Any]:
     data = copy.deepcopy(DEFAULT_SETTINGS)
     data.update({k: v for k, v in raw.items() if k in DEFAULT_SETTINGS})
     try:
-        data["offset_days"] = max(1, int(data.get("offset_days") or 90))
+        data["offset_days"] = max(1, int(data.get("offset_days") or 89))
     except (TypeError, ValueError):
-        data["offset_days"] = 90
+        data["offset_days"] = 89
     try:
         data["remind_hour"] = min(23, max(0, int(data.get("remind_hour") or 9)))
         data["remind_minute"] = min(59, max(0, int(data.get("remind_minute") or 0)))

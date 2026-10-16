@@ -18,7 +18,7 @@ def test_defaults(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     data = load_settings()
     assert data["eligibility"] == settings_mod.DEFAULT_SETTINGS["eligibility"]
-    assert data["offset_days"] == 90
+    assert data["offset_days"] == 89
 
 
 def test_normalize_raw(tmp_path, monkeypatch):

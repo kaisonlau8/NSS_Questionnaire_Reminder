@@ -1,5 +1,5 @@
 {
-  "offset_days": 90,
+  "offset_days": 89,
   "remind_hour": 9,
   "remind_minute": 0,
   "scheduler_enabled": true,

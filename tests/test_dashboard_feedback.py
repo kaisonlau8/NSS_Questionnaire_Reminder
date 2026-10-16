@@ -30,6 +30,13 @@ def test_feedback_styles_match_antd_components():
     assert 'id="i-loading"' in SPRITE
 
 
+def test_dashboard_reminder_window_is_day_89():
+    assert "交付日 +89 天" in HTML
+    assert "车辆交付 89 天后" in HTML
+    assert "+90 天" not in HTML
+    assert "交付 90 天" not in HTML
+
+
 def test_dashboard_wires_loading_spin_upload_and_toasts():
     for marker in (
         'id="page-spin"',

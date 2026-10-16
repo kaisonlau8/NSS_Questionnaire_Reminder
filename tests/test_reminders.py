@@ -27,7 +27,7 @@ def make_vehicle(vin: str, due_date: str = "2026-01-01", series_name: str = "全
 @pytest.fixture
 def patched(monkeypatch):
     def _setup(vehicles, settings=None, patch_recipients=True):
-        settings = settings or {"eligibility": DEFAULT_SETTINGS["eligibility"], "offset_days": 90}
+        settings = settings or {"eligibility": DEFAULT_SETTINGS["eligibility"], "offset_days": 89}
         sent: list[tuple[str, str]] = []
         marked: list[str] = []
         logs: list[dict] = []
@@ -45,6 +45,15 @@ def patched(monkeypatch):
         return sent, marked, logs
 
     return _setup
+
+
+def test_message_says_survey_arrives_tomorrow():
+    text = reminder.build_message(make_vehicle("LSVMSG0000000001", plate="京A12345", model="全新M817 HERO"))
+    assert "该用户明天将会收到 NSS 满意度调研问卷，请及时跟进！" in text
+    assert "今日收到" not in text
+    assert "VIN：LSVMSG0000000001" in text
+    assert "交付日期：2025-10-03" in text
+    assert "车牌号：京A12345" in text
 
 
 def test_dry_run_counts(patched):
@@ -154,7 +163,7 @@ def test_national_recipients_excluded(patched):
     )
     settings = {
         "eligibility": DEFAULT_SETTINGS["eligibility"],
-        "offset_days": 90,
+        "offset_days": 89,
         "national_recipients": [{"name": "刘明轩"}, {"name": "胡进"}],
     }
     sent, _, _ = patched([vehicle], settings=settings, patch_recipients=False)
