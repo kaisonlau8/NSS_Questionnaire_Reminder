@@ -15,7 +15,8 @@
     .ant-header .in { max-width: 1080px; }
     .container { max-width: 1080px; }
     .nss-meta { margin-left: auto; font-size: var(--ant-font-size-table); color: var(--ant-color-text-tertiary); white-space: nowrap; }
-    @media (max-width: 768px) { .nss-meta { display: none; } }
+    /* 顶栏说明文字与统一汉堡同一断点（<=860px）隐藏 */
+    @media (max-width: 860px) { .nss-meta { display: none; } }
     /* ---- 双文件导入（ant-upload-drag 风格，蓝/白） ---- */
     .dual-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .dual-slot { border: 1px dashed var(--ant-primary); border-radius: 8px; background: #fff;
