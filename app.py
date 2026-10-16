@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ from nss.settings import load_settings, save_settings  # noqa: E402
 from nss.time_utils import beijing_strftime, beijing_today, ensure_beijing_tz  # noqa: E402
 from nss.vehicles import (  # noqa: E402
     find_seed_excel,
+    import_dual,
     import_excel,
     load_vehicles,
     next_due_date,
@@ -154,6 +156,50 @@ def api_upload():
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": str(exc)}), 400
     return jsonify({"ok": True, **result, "path": dest.name})
+
+
+DUAL_UPLOAD_FIELDS = (
+    ("relation", "① 客户车辆关系（DMS 导出数据）"),
+    ("delivery", "② 车辆交付明细（数据门户导出数据）"),
+)
+
+
+def _safe_upload_name(filename: str) -> str:
+    """保留中文的文件名清洗：只取 basename，去掉路径/控制字符等危险字符。"""
+    base = Path(filename.replace("\\", "/")).name
+    base = re.sub(r'[\\/:*?"<>|\r\n\t\x00]', "_", base).strip(" .")
+    return base
+
+
+@app.post("/api/upload-dual")
+def api_upload_dual():
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    uploads: dict[str, object] = {}
+    for field, label in DUAL_UPLOAD_FIELDS:
+        upload = request.files.get(field)
+        if not upload or not upload.filename:
+            return jsonify({"ok": False, "error": f"请上传 {label} 的 Excel 文件（.xlsx）"}), 400
+        name = _safe_upload_name(upload.filename)
+        if not name.lower().endswith(".xlsx"):
+            return jsonify({"ok": False, "error": f"{label} 只接受 .xlsx 文件"}), 400
+        uploads[field] = (upload, name)
+    dests: dict[str, Path] = {}
+    for field, (upload, name) in uploads.items():
+        dest = UPLOAD_DIR / f"{stamp}_{name}"
+        upload.save(dest)
+        dests[field] = dest
+    try:
+        result = import_dual(dests["relation"], dests["delivery"])
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify(
+        {
+            "ok": True,
+            "stats": result["stats"],
+            "meta": vehicles_meta(),
+            "paths": {field: dest.name for field, dest in dests.items()},
+        }
+    )
 
 
 @app.post("/api/sync")
