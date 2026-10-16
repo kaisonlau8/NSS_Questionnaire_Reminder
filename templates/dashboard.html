@@ -26,6 +26,15 @@
   </div></header>
 
   <div class="container">
+    <div id="page-spin" class="ant-spin-nested-loading">
+    <div>
+      <div class="ant-spin ant-spin-lg ant-spin-spinning ant-spin-show-text" role="status">
+        <span class="ant-spin-dot ant-spin-dot-spin" aria-hidden="true">
+          <i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i>
+        </span>
+        <div class="ant-spin-text">加载中…</div>
+      </div>
+      <div class="ant-spin-container ant-spin-blur">
     <header class="ant-page-header">
       <div class="ant-page-header-heading">
         <h1>交付问卷提醒控制台</h1>
@@ -48,9 +57,9 @@
       <div class="ant-card-body">
       <p class="muted" id="status-line">加载中…</p>
       <div class="ant-flex ant-mt-2">
-        <button class="ant-btn ant-btn-primary" onclick="syncBitable()"><svg class="ai" aria-hidden="true"><use href="#i-reload"/></svg>同步门店联系人</button>
-        <button class="ant-btn" id="btn-sched-start" onclick="schedStart()"><svg class="ai" aria-hidden="true"><use href="#i-play-circle"/></svg>启动定时</button>
-        <button class="ant-btn" id="btn-sched-stop" onclick="schedStop()"><svg class="ai" aria-hidden="true"><use href="#i-stop"/></svg>停止定时</button>
+        <button class="ant-btn ant-btn-primary" id="btn-sync" type="button" onclick="syncBitable()"><svg class="ai" aria-hidden="true"><use href="#i-reload"/></svg>同步门店联系人</button>
+        <button class="ant-btn" id="btn-sched-start" type="button" onclick="schedStart()"><svg class="ai" aria-hidden="true"><use href="#i-play-circle"/></svg>启动定时</button>
+        <button class="ant-btn" id="btn-sched-stop" type="button" onclick="schedStop()"><svg class="ai" aria-hidden="true"><use href="#i-stop"/></svg>停止定时</button>
       </div>
       <p class="muted ant-mt-2" id="sync-hint"></p>
       </div>
@@ -62,7 +71,21 @@
       <p class="muted">新版「客户车辆关系」导出。模板列：VIN、车系名称、售后车系、车型名称、车牌号、数据类型、创建时间（交付日期）、交付门店名称/编码、所属门店名称/编码。上传后整表覆盖本地档案；创建时间为空的行跳过，用车人/车主个人信息不落库。</p>
       <div class="ant-flex">
         <input type="file" id="excel" accept=".xlsx">
-        <button class="ant-btn ant-btn-primary" onclick="uploadExcel()"><svg class="ai" aria-hidden="true"><use href="#i-upload"/></svg>上传并导入</button>
+        <button class="ant-btn ant-btn-primary" id="btn-upload" type="button" onclick="uploadExcel()"><svg class="ai" aria-hidden="true"><use href="#i-upload"/></svg>上传并导入</button>
+      </div>
+      <div id="upload-progress" class="ant-upload-list ant-upload-list-text" hidden>
+        <div class="ant-upload-list-item">
+          <div class="ant-upload-list-item-name">
+            <svg class="ai" aria-hidden="true"><use href="#i-file-excel"/></svg>
+            <span id="upload-name"></span>
+          </div>
+          <div id="upload-progress-line" class="ant-progress ant-progress-line ant-progress-status-active">
+            <div class="ant-progress-outer"><div class="ant-progress-inner">
+              <div class="ant-progress-bg" id="upload-bar" style="width:0%"></div>
+            </div></div>
+            <span class="ant-progress-text" id="upload-pct">0%</span>
+          </div>
+        </div>
       </div>
       <p class="muted ant-mt-2" id="upload-hint"></p>
       </div>
@@ -82,11 +105,20 @@
       <div class="ant-card-body">
       <div class="ant-flex">
         <input class="ant-input" type="date" id="due-date" style="width:auto">
-        <button class="ant-btn" onclick="loadDue()"><svg class="ai" aria-hidden="true"><use href="#i-reload"/></svg>刷新列表</button>
-        <button class="ant-btn" onclick="runJob(true)">dry-run</button>
-        <button class="ant-btn ant-btn-primary" onclick="runJob(false)"><svg class="ai" aria-hidden="true"><use href="#i-message"/></svg>立即发送</button>
+        <button class="ant-btn" id="btn-due" type="button" onclick="loadDue()"><svg class="ai" aria-hidden="true"><use href="#i-reload"/></svg>刷新列表</button>
+        <button class="ant-btn" id="btn-dry" type="button" onclick="runJob(true)">dry-run</button>
+        <button class="ant-btn ant-btn-primary" id="btn-send" type="button" onclick="runJob(false)"><svg class="ai" aria-hidden="true"><use href="#i-message"/></svg>立即发送</button>
       </div>
       <p class="muted ant-mt-2" id="run-hint"></p>
+      <div id="due-spin" class="ant-spin-nested-loading">
+        <div>
+          <div class="ant-spin ant-spin-show-text" role="status" aria-hidden="true">
+            <span class="ant-spin-dot ant-spin-dot-spin" aria-hidden="true">
+              <i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i><i class="ant-spin-dot-item"></i>
+            </span>
+            <div class="ant-spin-text">加载中…</div>
+          </div>
+          <div class="ant-spin-container">
       <div class="tw ant-table-wrap"><table><thead>
           <tr><th data-card-title>VIN</th><th>交付日期</th><th>门店</th><th>服务经理</th><th>收件人</th><th>匹配</th></tr>
         </thead>
@@ -94,6 +126,9 @@
           <tr><td colspan="6" class="muted">加载中…</td></tr>
         </tbody>
       </table></div>
+          </div>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -107,13 +142,145 @@
     </div>
 
     <footer class="ant-page-footer" style="text-align:center">猛士科技 服务运营 — NSS 问卷提醒 · 端口 9005</footer>
+      </div>
+    </div>
+    </div>
   </div>
+  <div id="ant-message" class="ant-message" aria-live="polite" aria-relevant="additions"></div>
+  <div id="ant-notification" class="ant-notification" aria-live="polite" aria-relevant="additions"></div>
   <script>
     async function api(url, opts) {
       const resp = await fetch(url, opts);
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || resp.statusText || "请求失败");
       return data;
+    }
+    const MESSAGE_ICON = {
+      success: "i-check-circle",
+      error: "i-close-circle",
+      warning: "i-exclamation-circle",
+      info: "i-info-circle",
+    };
+    function svgIcon(id, className) {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", className || "ai");
+      svg.setAttribute("aria-hidden", "true");
+      const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", "#" + id);
+      svg.appendChild(use);
+      return svg;
+    }
+    function setButtonLoading(btn, loading) {
+      if (!btn) return;
+      btn.classList.toggle("ant-btn-loading", !!loading);
+      btn.disabled = !!loading;
+      btn.setAttribute("aria-busy", loading ? "true" : "false");
+      const existing = btn.querySelector(":scope > .ant-btn-loading-icon");
+      if (loading) {
+        if (!existing) {
+          const icon = document.createElement("span");
+          icon.className = "ant-btn-loading-icon";
+          icon.appendChild(svgIcon("i-loading", "ai anticon-spin"));
+          btn.insertBefore(icon, btn.firstChild);
+        }
+      } else if (existing) {
+        existing.remove();
+      }
+    }
+    function setSpin(host, spinning) {
+      if (!host) return;
+      const spin = host.querySelector(":scope > div > .ant-spin");
+      const body = host.querySelector(":scope > div > .ant-spin-container");
+      if (!spin || !body) return;
+      spin.classList.toggle("ant-spin-spinning", !!spinning);
+      body.classList.toggle("ant-spin-blur", !!spinning);
+      spin.setAttribute("aria-hidden", spinning ? "false" : "true");
+      body.setAttribute("aria-busy", spinning ? "true" : "false");
+    }
+    function showMessage(type, text) {
+      const root = document.getElementById("ant-message");
+      if (!root) return;
+      const notice = document.createElement("div");
+      notice.className = "ant-message-notice";
+      const content = document.createElement("div");
+      content.className = "ant-message-notice-content";
+      const icon = document.createElement("span");
+      icon.className = "ant-message-icon ant-message-icon-" + type;
+      icon.appendChild(svgIcon(MESSAGE_ICON[type] || "i-info-circle"));
+      const label = document.createElement("span");
+      label.className = "ant-message-text";
+      label.textContent = String(text || "");
+      content.append(icon, label);
+      notice.appendChild(content);
+      root.appendChild(notice);
+      while (root.children.length > 3) root.removeChild(root.firstChild);
+      window.setTimeout(function () {
+        notice.classList.add("ant-message-notice-leave");
+        window.setTimeout(function () { notice.remove(); }, 200);
+      }, 3000);
+    }
+    function showNotification(type, title, description) {
+      const root = document.getElementById("ant-notification");
+      if (!root) return;
+      const notice = document.createElement("div");
+      notice.className = "ant-notification-notice";
+      const icon = document.createElement("span");
+      icon.className = "ant-notification-notice-icon ant-message-icon-" + type;
+      icon.appendChild(svgIcon(MESSAGE_ICON[type] || "i-info-circle"));
+      const body = document.createElement("div");
+      body.className = "ant-notification-notice-content";
+      const heading = document.createElement("div");
+      heading.className = "ant-notification-notice-message";
+      heading.textContent = String(title || "");
+      const desc = document.createElement("div");
+      desc.className = "ant-notification-notice-description";
+      desc.textContent = String(description || "");
+      body.append(heading, desc);
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "ant-notification-notice-close";
+      close.setAttribute("aria-label", "关闭");
+      close.appendChild(svgIcon("i-close"));
+      close.addEventListener("click", function () { notice.remove(); });
+      notice.append(icon, body, close);
+      root.appendChild(notice);
+      while (root.children.length > 3) root.removeChild(root.firstChild);
+      let timer = 0;
+      function arm(ms) {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(function () {
+          notice.classList.add("ant-notification-notice-leave");
+          window.setTimeout(function () { notice.remove(); }, 200);
+        }, ms);
+      }
+      arm(4500);
+      notice.addEventListener("mouseenter", function () { window.clearTimeout(timer); });
+      notice.addEventListener("mouseleave", function () { arm(1500); });
+    }
+    async function withLoading(btn, task) {
+      if (!btn || btn.classList.contains("ant-btn-loading")) return;
+      setButtonLoading(btn, true);
+      try { await task(); }
+      finally { setButtonLoading(btn, false); }
+    }
+    async function withPair(clicked, other, task) {
+      if (!clicked || clicked.classList.contains("ant-btn-loading")) return;
+      if (other && other.classList.contains("ant-btn-loading")) return;
+      if (other) other.disabled = true;
+      try {
+        await withLoading(clicked, task);
+      } finally {
+        if (other && !other.classList.contains("ant-btn-loading")) other.disabled = false;
+      }
+    }
+    function renderUpload(name, percent, status) {
+      const host = document.getElementById("upload-progress");
+      host.hidden = false;
+      document.getElementById("upload-name").textContent = name;
+      const pct = Math.max(0, Math.min(100, Math.round(percent)));
+      document.getElementById("upload-bar").style.width = pct + "%";
+      document.getElementById("upload-pct").textContent = status === "active" && pct >= 100 ? "导入中" : pct + "%";
+      document.getElementById("upload-progress-line").className = "ant-progress ant-progress-line ant-progress-status-" + status;
     }
     function namesOf(items) {
       const roleLabel = { manager: "服务经理", supervisor: "督导" };
@@ -191,65 +358,155 @@
         <td>${x.excluded ?? ""}</td><td>${x.failed ?? ""}</td><td>${x.unmatched ?? ""}</td>
       </tr>`).join("");
     }
-    async function refreshAll() {
-      const status = await api("/api/status");
-      fillStatus(status);
-      const date = document.getElementById("due-date").value || status.now.slice(0, 10);
-      document.getElementById("due-date").value = date;
-      const due = await api("/api/due?date=" + date);
-      fillDue(due);
-      const logs = await api("/api/logs");
-      fillLogs(logs.items || []);
+    async function refreshAll(opts) {
+      const dueSpin = !!(opts && opts.dueSpin);
+      if (dueSpin) setSpin(document.getElementById("due-spin"), true);
+      try {
+        const status = await api("/api/status");
+        fillStatus(status);
+        const date = document.getElementById("due-date").value || status.now.slice(0, 10);
+        document.getElementById("due-date").value = date;
+        const due = await api("/api/due?date=" + date);
+        fillDue(due);
+        const logs = await api("/api/logs");
+        fillLogs(logs.items || []);
+      } finally {
+        if (dueSpin) setSpin(document.getElementById("due-spin"), false);
+      }
     }
     async function uploadExcel() {
-      const file = document.getElementById("excel").files[0];
-      if (!file) { document.getElementById("upload-hint").textContent = "请先选择文件"; return; }
-      const fd = new FormData();
-      fd.append("file", file);
-      try {
-        const data = await api("/api/upload", { method: "POST", body: fd });
-        const st = data.stats;
-        document.getElementById("upload-hint").textContent = st
-          ? `已导入 ${data.count} 台 · 无创建时间跳过 ${st.skipped_no_date} · 重复 VIN ${st.duplicates}`
-          : `已导入 ${data.count} 台 · ${data.imported_at}`;
-        await refreshAll();
-      } catch (e) {
-        document.getElementById("upload-hint").textContent = e.message;
+      const input = document.getElementById("excel");
+      const file = input.files && input.files[0];
+      const hint = document.getElementById("upload-hint");
+      if (!file) {
+        hint.textContent = "请先选择文件";
+        showMessage("warning", "请先选择文件");
+        return;
       }
+      await withLoading(document.getElementById("btn-upload"), function () {
+        return new Promise(function (resolve) {
+          input.disabled = true;
+          renderUpload(file.name, 0, "active");
+          const fd = new FormData();
+          fd.append("file", file);
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/api/upload");
+          xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable) renderUpload(file.name, (e.loaded / e.total) * 100, "active");
+          };
+          function finish(err, data) {
+            input.disabled = false;
+            if (err) {
+              renderUpload(file.name, 100, "exception");
+              hint.textContent = err;
+              showMessage("error", err);
+              resolve();
+              return;
+            }
+            const st = data.stats;
+            const text = st
+              ? `已导入 ${data.count} 台 · 无创建时间跳过 ${st.skipped_no_date} · 重复 VIN ${st.duplicates}`
+              : `已导入 ${data.count} 台 · ${data.imported_at}`;
+            renderUpload(file.name, 100, "success");
+            hint.textContent = text;
+            showNotification("success", "导入完成", text);
+            refreshAll().catch(function (e) { showMessage("error", e.message); }).then(resolve);
+          }
+          xhr.onerror = function () { finish("上传失败"); };
+          xhr.onload = function () {
+            let data = {};
+            try { data = JSON.parse(xhr.responseText || "{}"); } catch (e) { data = {}; }
+            if (xhr.status < 200 || xhr.status >= 300 || data.ok === false) {
+              finish(data.error || xhr.statusText || "请求失败");
+              return;
+            }
+            finish(null, data);
+          };
+          xhr.send(fd);
+        });
+      });
     }
     async function syncBitable() {
-      document.getElementById("sync-hint").textContent = "同步中…";
-      try {
-        const data = await api("/api/sync", { method: "POST" });
-        document.getElementById("sync-hint").textContent =
-          `同步完成 ${data.synced_at} · 门店 ${data.store_count} · 督导 ${data.supervisor_count}`;
-        await refreshAll();
-      } catch (e) {
-        document.getElementById("sync-hint").textContent = e.message;
-      }
+      const hint = document.getElementById("sync-hint");
+      await withLoading(document.getElementById("btn-sync"), async () => {
+        hint.textContent = "同步中…";
+        try {
+          const data = await api("/api/sync", { method: "POST" });
+          const text = `同步完成 ${data.synced_at} · 门店 ${data.store_count} · 督导 ${data.supervisor_count}`;
+          hint.textContent = text;
+          showNotification("success", "同步完成", text);
+          await refreshAll();
+        } catch (e) {
+          hint.textContent = e.message;
+          showMessage("error", e.message);
+        }
+      });
     }
-    async function loadDue() { await refreshAll(); }
+    async function loadDue() {
+      await withLoading(document.getElementById("btn-due"), async () => {
+        try {
+          await refreshAll({ dueSpin: true });
+        } catch (e) {
+          document.getElementById("status-line").textContent = e.message;
+          showMessage("error", e.message);
+        }
+      });
+    }
     async function runJob(dry) {
-      const date = document.getElementById("due-date").value;
-      document.getElementById("run-hint").textContent = dry ? "dry-run 中…" : "发送中…";
-      try {
-        const data = await api("/api/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date, dry_run: dry }),
-        });
-        document.getElementById("run-hint").textContent =
-          `${data.date} 到期 ${data.due_count} · 发送 ${data.sent} · 跳过 ${data.skipped} · 排除 ${data.excluded ?? 0} · 失败 ${data.failed} · 未匹配 ${data.unmatched}`;
-        await refreshAll();
-      } catch (e) {
-        document.getElementById("run-hint").textContent = e.message;
-      }
+      const clicked = document.getElementById(dry ? "btn-dry" : "btn-send");
+      const other = document.getElementById(dry ? "btn-send" : "btn-dry");
+      const hint = document.getElementById("run-hint");
+      await withPair(clicked, other, async () => {
+        hint.textContent = dry ? "dry-run 中…" : "发送中…";
+        try {
+          const date = document.getElementById("due-date").value;
+          const data = await api("/api/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date, dry_run: dry }),
+          });
+          const text = `${data.date} 到期 ${data.due_count} · 发送 ${data.sent} · 跳过 ${data.skipped} · 排除 ${data.excluded ?? 0} · 失败 ${data.failed} · 未匹配 ${data.unmatched}`;
+          hint.textContent = text;
+          showNotification(data.failed ? "warning" : "success", dry ? "dry-run 完成" : "发送完成", text);
+          await refreshAll();
+        } catch (e) {
+          hint.textContent = e.message;
+          showMessage("error", e.message);
+        }
+      });
     }
-    async function schedStart() { await api("/api/scheduler/start", { method: "POST" }); await refreshAll(); }
-    async function schedStop() { await api("/api/scheduler/stop", { method: "POST" }); await refreshAll(); }
-    refreshAll().catch(err => {
-      document.getElementById("status-line").textContent = err.message;
-    });
+    async function schedStart() {
+      await withPair(document.getElementById("btn-sched-start"), document.getElementById("btn-sched-stop"), async () => {
+        try {
+          await api("/api/scheduler/start", { method: "POST" });
+          showMessage("success", "定时已启动");
+          await refreshAll();
+        } catch (e) {
+          showMessage("error", e.message);
+        }
+      });
+    }
+    async function schedStop() {
+      await withPair(document.getElementById("btn-sched-stop"), document.getElementById("btn-sched-start"), async () => {
+        try {
+          await api("/api/scheduler/stop", { method: "POST" });
+          showMessage("success", "定时已停止");
+          await refreshAll();
+        } catch (e) {
+          showMessage("error", e.message);
+        }
+      });
+    }
+    (async function boot() {
+      try {
+        await refreshAll();
+      } catch (err) {
+        document.getElementById("status-line").textContent = err.message;
+        showMessage("error", err.message);
+      } finally {
+        setSpin(document.getElementById("page-spin"), false);
+      }
+    })();
   </script>
   <script>{{ ds_cards()|safe }}</script>
 </body>

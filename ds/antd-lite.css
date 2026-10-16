@@ -27,6 +27,8 @@
        19 移动端全局适配（<=768px：44px 触控 / filter-bar 纵向堆叠 / actions 换行）
        20 打印
        21 兼容层：reportdb 旧模板 class（.card/.btn/.filters/.tw/.sticky1/... ）映射
+       22 反馈：Button loading / Spin / Progress / Upload / Message / Notification
+          （动效用 CSS，对齐 Ant Design v5 默认蓝白；不引入动画库，不改主题色）
    · 移动端断点：导航 <=860px 变汉堡（与顶栏 JS 的 matchMedia 861px 对齐）；
      其余 <=768px（覆盖 360 / 390 / 414 宽），可点击控件最小高度 44px。
    ========================================================================== */
@@ -1523,4 +1525,309 @@ td.row-action { text-align: right; white-space: nowrap; }
   table.sticky1 td.row-action, table.sticky1 th.row-action-h { position: sticky; right: 0; width: 112px; min-width: 112px; z-index: 3; background: var(--ant-color-bg-container, #fff); box-shadow: -1px 0 0 var(--ant-color-split, #f0f0f0); }
   table.sticky1 td.row-reason, table.sticky1 th.row-reason-h { position: sticky; right: 112px; z-index: 3; background: var(--ant-color-bg-container, #fff); box-shadow: -1px 0 0 var(--ant-color-split, #f0f0f0); }
   table.sticky1 th.row-action-h, table.sticky1 th.row-reason-h { z-index: 6; }
+}
+
+/* ==========================================================================
+   22. 反馈（Ant Design v5 默认：Button loading / Spin / Progress / Upload /
+       Message / Notification）
+   --------------------------------------------------------------------------
+   只用本文件的 CSS 动画，对齐 antd 默认蓝 #1677ff 与白底轻提示。
+   不引入第三方动画库，不覆盖第 1 节主题色。
+   ========================================================================== */
+
+/* ---- 22.1 Button loading：主色按钮保持蓝底白字，仅降低透明度并换成转圈 ---- */
+@keyframes antRotate {
+  to { transform: rotate(360deg); }
+}
+.ant-btn.ant-btn-loading {
+  cursor: default;
+  opacity: .65;
+}
+.ant-btn.ant-btn-loading[disabled],
+.ant-btn.ant-btn-loading.ant-btn-disabled {
+  pointer-events: none;
+  cursor: default;
+  opacity: .65;
+}
+.ant-btn-primary.ant-btn-loading[disabled],
+.ant-btn-primary.ant-btn-loading.ant-btn-disabled {
+  color: #fff;
+  background: var(--ant-primary);
+  border-color: var(--ant-primary);
+}
+.ant-btn.ant-btn-loading[disabled]:not(.ant-btn-primary),
+.ant-btn.ant-btn-loading.ant-btn-disabled:not(.ant-btn-primary) {
+  color: var(--ant-color-text);
+  background: var(--ant-color-bg-container);
+  border-color: var(--ant-color-border);
+}
+.ant-btn.ant-btn-loading > .ai { display: none; }
+.ant-btn-loading-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+  line-height: 0;
+}
+.ant-btn-loading-icon .ai {
+  width: 1em;
+  height: 1em;
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: antRotate 1s infinite linear;
+}
+
+/* ---- 22.2 Spin（四粒蓝点；嵌套时盖住内容顶部 400px，避免长页转圈跑出视口） ---- */
+@keyframes antSpinMove {
+  to { opacity: 1; }
+}
+.ant-spin-nested-loading { position: relative; }
+.ant-spin-nested-loading > div > .ant-spin {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  max-height: 400px;
+  pointer-events: none;
+}
+.ant-spin-nested-loading > div > .ant-spin.ant-spin-spinning { display: flex; }
+.ant-spin-dot {
+  position: relative;
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  font-size: 20px;
+}
+.ant-spin-lg .ant-spin-dot { width: 32px; height: 32px; font-size: 32px; }
+.ant-spin-dot-item {
+  position: absolute;
+  display: block;
+  width: 9px;
+  height: 9px;
+  background: var(--ant-primary);
+  border-radius: 50%;
+  transform: scale(.75);
+  transform-origin: 50% 50%;
+  opacity: .3;
+  animation: antSpinMove 1s infinite linear alternate;
+}
+.ant-spin-lg .ant-spin-dot-item { width: 14px; height: 14px; }
+.ant-spin-dot-item:nth-child(1) { top: 0; left: 0; }
+.ant-spin-dot-item:nth-child(2) { top: 0; right: 0; animation-delay: .4s; }
+.ant-spin-dot-item:nth-child(3) { right: 0; bottom: 0; animation-delay: .8s; }
+.ant-spin-dot-item:nth-child(4) { bottom: 0; left: 0; animation-delay: 1.2s; }
+.ant-spin-text {
+  margin-top: 8px;
+  color: var(--ant-primary);
+  font-size: var(--ant-font-size-base);
+  text-shadow: 0 1px 2px #fff;
+}
+.ant-spin-container { position: relative; transition: opacity .3s; }
+.ant-spin-container.ant-spin-blur {
+  opacity: .5;
+  user-select: none;
+  pointer-events: none;
+}
+.ant-spin-container.ant-spin-blur::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: .3;
+  pointer-events: none;
+}
+
+/* ---- 22.3 Progress + Upload 列表（线形进度，主色；成功绿、失败红） ---- */
+.ant-progress-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: var(--ant-font-size-base);
+  line-height: 1;
+}
+.ant-progress-outer { flex: 1; min-width: 0; }
+.ant-progress-inner {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, .06);
+  border-radius: 100px;
+}
+.ant-progress-bg {
+  position: relative;
+  height: 8px;
+  background: var(--ant-primary);
+  border-radius: 100px;
+  transition: width .2s linear;
+}
+.ant-progress-status-success .ant-progress-bg { background: var(--ant-success); }
+.ant-progress-status-exception .ant-progress-bg { background: var(--ant-error); }
+.ant-progress-text {
+  flex: none;
+  width: 3.4em;
+  font-size: var(--ant-font-size-sm);
+  color: var(--ant-color-text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ant-progress-status-active .ant-progress-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  border-radius: 100px;
+  opacity: 0;
+  animation: ant-progress-active 2.4s cubic-bezier(.23, 1, .32, 1) infinite;
+}
+@keyframes ant-progress-active {
+  0% { transform: translateX(-100%) scaleX(0); opacity: .1; }
+  20% { transform: translateX(-100%) scaleX(0); opacity: .5; }
+  100% { transform: translateX(0) scaleX(1); opacity: 0; }
+}
+.ant-upload-list { margin-top: 8px; }
+.ant-upload-list[hidden] { display: none; }
+.ant-upload-list-item-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ant-color-text);
+  font-size: var(--ant-font-size-base);
+}
+.ant-upload-list-item-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 22.4 Message（顶部居中白底轻提示） ---- */
+@keyframes antMessageMoveIn {
+  0% { opacity: 0; transform: translateY(-8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes antMessageLeave {
+  to { opacity: 0; transform: translateY(-8px); }
+}
+.ant-message {
+  position: fixed;
+  top: 8px;
+  left: 0;
+  right: 0;
+  z-index: 1010;
+  pointer-events: none;
+  text-align: center;
+}
+.ant-message-notice {
+  padding: 8px;
+  text-align: center;
+  animation: antMessageMoveIn .3s cubic-bezier(.78, .14, .15, .86);
+}
+.ant-message-notice-leave { animation: antMessageLeave .2s ease forwards; }
+.ant-message-notice-content {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 9px 12px;
+  background: #fff;
+  border-radius: var(--ant-radius-lg);
+  box-shadow: var(--ant-shadow-dropdown);
+  pointer-events: auto;
+  text-align: left;
+  font-size: var(--ant-font-size-base);
+  line-height: 1.5714;
+}
+.ant-message-icon { display: inline-flex; font-size: 16px; line-height: 1; margin-top: 2px; }
+.ant-message-icon .ai { width: 16px; height: 16px; }
+.ant-message-icon-success { color: var(--ant-success); }
+.ant-message-icon-error { color: var(--ant-error); }
+.ant-message-icon-warning { color: var(--ant-warning); }
+.ant-message-icon-info { color: var(--ant-primary); }
+.ant-message-text { min-width: 0; }
+
+/* ---- 22.5 Notification（右上角白卡片，轻阴影） ---- */
+@keyframes antNotificationIn {
+  0% { opacity: 0; transform: translateX(16px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.ant-notification {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 1050;
+  width: 384px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+.ant-notification-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px 24px;
+  background: #fff;
+  border-radius: var(--ant-radius-lg);
+  box-shadow: var(--ant-shadow-dropdown);
+  pointer-events: auto;
+  animation: antNotificationIn .24s ease;
+}
+.ant-notification-notice-leave { animation: antMessageLeave .2s ease forwards; }
+.ant-notification-notice-icon { display: inline-flex; font-size: 24px; line-height: 1; }
+.ant-notification-notice-icon .ai { width: 24px; height: 24px; }
+.ant-notification-notice-content { flex: 1; min-width: 0; }
+.ant-notification-notice-message {
+  margin-bottom: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--ant-color-text);
+}
+.ant-notification-notice-description {
+  font-size: var(--ant-font-size-base);
+  line-height: 1.5714;
+  color: var(--ant-color-text);
+  overflow-wrap: anywhere;
+}
+.ant-notification-notice-close {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ant-color-text-tertiary);
+  line-height: 1;
+  font-size: 14px;
+  cursor: pointer;
+}
+.ant-notification-notice-close:hover { color: var(--ant-color-text); }
+.ant-notification-notice-close .ai { width: 14px; height: 14px; }
+
+@media (max-width: 768px) {
+  .ant-notification { top: 16px; right: 16px; left: 16px; width: auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ant-btn-loading-icon .ai,
+  .ant-spin-dot-item,
+  .ant-progress-status-active .ant-progress-bg::before,
+  .ant-message-notice,
+  .ant-notification-notice,
+  .ant-message-notice-leave,
+  .ant-notification-notice-leave {
+    animation: none;
+  }
+  .ant-spin-dot-item { opacity: 1; }
+}
+
+@media print {
+  .ant-message, .ant-notification, .ant-spin { display: none !important; }
+  .ant-spin-container.ant-spin-blur { opacity: 1 !important; pointer-events: auto !important; }
 }
