@@ -76,7 +76,7 @@
     <div class="ant-card">
       <div class="ant-card-head"><h2 class="ant-card-head-title">状态</h2></div>
       <div class="ant-card-body">
-      <p class="muted" id="status-line">加载中…</p>
+      <p class="muted" id="status-line" data-ds-skeleton>加载中…</p>
       <div class="ant-flex ant-mt-2">
         <button class="ant-btn ant-btn-primary" id="btn-sync" type="button" onclick="syncBitable()"><svg class="ai" aria-hidden="true"><use href="#i-reload"/></svg>同步门店联系人</button>
         <button class="ant-btn" id="btn-sched-start" type="button" onclick="schedStart()"><svg class="ai" aria-hidden="true"><use href="#i-play-circle"/></svg>启动定时</button>
@@ -171,7 +171,7 @@
       <div class="tw ant-table-wrap"><table><thead>
           <tr><th data-card-title>VIN</th><th>交付日期</th><th>门店</th><th>服务经理</th><th>收件人</th><th>匹配</th></tr>
         </thead>
-        <tbody id="due-body">
+        <tbody id="due-body" data-ds-skeleton>
           <tr><td colspan="6" class="muted">加载中…</td></tr>
         </tbody>
       </table></div>
