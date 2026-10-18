@@ -195,6 +195,7 @@
   </div>
   <div id="ant-message" class="ant-message" aria-live="polite" aria-relevant="additions"></div>
   <div id="ant-notification" class="ant-notification" aria-live="polite" aria-relevant="additions"></div>
+  <script>{{ ds_cards()|safe }}</script>
   <script>
     async function api(url, opts) {
       const resp = await fetch(url, opts);
@@ -363,7 +364,7 @@
         return;
       }
       body.innerHTML = stores.map(s => `<tr>
-        <td>${s.code || ""}</td><td>${s.name || ""}</td><td>${s.region || ""}</td>
+        <td>${s.code || ""}</td><td>${DS.noBreakTail(s.name)}</td><td>${DS.noBreakTail(s.region)}</td>
         <td>${s.supervisor || "—"}</td>
         <td>${s.manager_ok ? (s.manager || "已配置") : '<span class="ant-tag ant-tag-error">无联系人</span>'}</td>
       </tr>`).join("");
@@ -386,7 +387,7 @@
         return `<tr>
           <td>${v.vin || ""}</td>
           <td>${v.delivery_date || ""}</td>
-          <td>${v.store || ""}</td>
+          <td>${DS.noBreakTail(v.store)}</td>
           <td>${v.manager_name || "—"}</td>
           <td>${namesOf(v.recipients)}</td>
           <td>${badge}</td>
@@ -673,6 +674,5 @@
       }
     })();
   </script>
-  <script>{{ ds_cards()|safe }}</script>
 </body>
 </html>

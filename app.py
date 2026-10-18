@@ -40,6 +40,12 @@ ensure_dirs()
 
 app = Flask(__name__, template_folder=str(ROOT / "templates"))
 
+# 共享断行过滤器（design-system/linebreak.py 由 sync.sh 同步到 ds/）
+from ds.linebreak import ds_wbr_filename, nobreak_tail  # noqa: E402
+
+app.jinja_env.filters["nobreak_tail"] = nobreak_tail
+app.jinja_env.filters["ds_wbr_filename"] = ds_wbr_filename
+
 # --- 设计系统（antd-lite.css / sprite.svg，由 design-system/sync.sh 同步到 ds/）---
 _ds_cache: dict[str, str] = {}
 
