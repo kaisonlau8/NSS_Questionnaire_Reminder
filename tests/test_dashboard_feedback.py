@@ -58,6 +58,19 @@ def test_dashboard_wires_loading_spin_upload_and_toasts():
         assert marker in HTML
 
 
+def test_dashboard_has_unmatched_vehicles_section():
+    for marker in (
+        "未匹配门店车辆",
+        'id="unmatched-count"',
+        'id="unmatched-summary"',
+        'id="unmatched-body"',
+        "function fillUnmatched",
+        'api("/api/unmatched")',
+    ):
+        assert marker in HTML
+    assert "区域匹配督导" not in HTML
+
+
 def test_primary_actions_keep_existing_api_payloads():
     assert 'api("/api/sync", { method: "POST" })' in HTML
     assert 'api("/api/scheduler/start", { method: "POST" })' in HTML

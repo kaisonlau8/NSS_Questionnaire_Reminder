@@ -181,6 +181,16 @@
     </div>
 
     <div class="ant-card">
+      <div class="ant-card-head"><h2 class="ant-card-head-title">未匹配门店车辆</h2><div class="ant-card-extra"><span class="ant-card-head-sub" id="unmatched-count">0 台</span></div></div>
+      <div class="ant-card-body">
+      <p class="muted" id="unmatched-summary">按 DMS 所属门店编码匹配；未匹配车辆不会发送提醒。</p>
+      <div class="tw ant-table-wrap ds-collapse" data-ds-title="未匹配门店车辆"><table><thead><tr><th data-card-title>VIN</th><th>店代码</th><th>DMS 门店</th><th>交付日期</th><th>到期日期</th></tr></thead>
+        <tbody id="unmatched-body" data-ds-skeleton><tr><td colspan="5" class="muted">加载中…</td></tr></tbody>
+      </table></div>
+      </div>
+    </div>
+
+    <div class="ant-card">
       <div class="ant-card-head"><h2 class="ant-card-head-title">最近任务</h2></div>
       <div class="ant-card-body">
       <div class="tw ant-table-wrap ds-collapse" data-ds-title="最近任务"><table><thead><tr><th data-card-title>时间</th><th>日期</th><th>到期</th><th>已发</th><th>跳过</th><th>排除</th><th>失败</th><th>未匹配</th></tr></thead>
@@ -376,14 +386,11 @@
         return;
       }
       body.innerHTML = data.items.map(v => {
-        const methodLabel = { code: "编码", name: "名称", region: "区域" };
         const badge = v.excluded_reason
           ? `<span class="ant-tag ant-tag-error">排除：${v.excluded_reason}</span>`
           : (v.unmatched
-            ? (v.match_method === "region"
-              ? '<span class="ant-tag ant-tag-warning">区域匹配督导</span>'
-              : '<span class="ant-tag ant-tag-warning">未匹配门店</span>')
-            : `<span class="ant-tag ant-tag-success">已匹配（${methodLabel[v.match_method] || "名称"}）</span>`);
+            ? '<span class="ant-tag ant-tag-warning">未匹配门店</span>'
+            : '<span class="ant-tag ant-tag-success">已匹配（编码）</span>');
         return `<tr>
           <td>${v.vin || ""}</td>
           <td>${v.delivery_date || ""}</td>
@@ -393,6 +400,29 @@
           <td>${badge}</td>
         </tr>`;
       }).join("");
+    }
+    function fillUnmatched(data) {
+      const body = document.getElementById("unmatched-body");
+      const items = data.items || [];
+      document.getElementById("unmatched-count").textContent = `${data.count || 0} 台`;
+      const rawGroups = data.by_store_code || {};
+      const entries = Array.isArray(rawGroups)
+        ? rawGroups.map(g => [g.store_code || "", g.count || 0])
+        : Object.entries(rawGroups);
+      document.getElementById("unmatched-summary").textContent = items.length
+        ? "按店代码汇总：" + entries.map(([code, count]) => `${code || "无店代码"} ×${count}`).join(" · ")
+        : "当前车辆档案中没有未匹配门店的车辆。";
+      if (!items.length) {
+        body.innerHTML = '<tr><td colspan="5" class="muted">没有未匹配门店的车辆</td></tr>';
+        return;
+      }
+      body.innerHTML = items.map(v => `<tr>
+        <td>${DS.escapeHtml(v.vin || "")}</td>
+        <td>${DS.escapeHtml(v.store_code || "—")}</td>
+        <td>${DS.noBreakTail(v.store_name || v.store)}</td>
+        <td>${DS.escapeHtml(v.delivery_date || "")}</td>
+        <td>${DS.escapeHtml(v.due_date || "")}</td>
+      </tr>`).join("");
     }
     function fillLogs(items) {
       const body = document.getElementById("log-body");
@@ -416,6 +446,8 @@
         document.getElementById("due-date").value = date;
         const due = await api("/api/due?date=" + date);
         fillDue(due);
+        const unmatched = await api("/api/unmatched");
+        fillUnmatched(unmatched);
         const logs = await api("/api/logs");
         fillLogs(logs.items || []);
       } finally {

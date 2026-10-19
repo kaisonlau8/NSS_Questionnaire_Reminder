@@ -19,8 +19,8 @@ sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
 from nss.bitable import load_stores, load_supervisors, load_sync_state, sync_all  # noqa: E402
-from nss.eligibility import ineligible_reason  # noqa: E402
-from nss.matching import enrich_vehicle  # noqa: E402
+from nss.eligibility import ineligible_reason, mask_vin  # noqa: E402
+from nss.matching import enrich_vehicles  # noqa: E402
 from nss.paths import UPLOAD_DIR, ensure_dirs  # noqa: E402
 from nss.reminder import recent_logs, recipients_for, run_reminders, sent_today_count  # noqa: E402
 from nss.scheduler import scheduler_status, start_scheduler, stop_scheduler  # noqa: E402
@@ -95,7 +95,7 @@ def _directory_rows() -> list[dict]:
 def _status_payload() -> dict:
     settings = load_settings()
     meta = vehicles_meta()
-    due = [enrich_vehicle(v) for v in load_vehicles() if v.get("due_date") == beijing_today().isoformat()]
+    due = enrich_vehicles([v for v in load_vehicles() if v.get("due_date") == beijing_today().isoformat()])
     return {
         "now": beijing_strftime("%Y-%m-%d %H:%M:%S"),
         "vehicles": meta,
@@ -132,11 +132,9 @@ def api_due():
     except ValueError:
         return jsonify({"ok": False, "error": "日期格式应为 YYYY-MM-DD"}), 400
     settings = load_settings()
+    due_vehicles = [vehicle for vehicle in load_vehicles() if vehicle.get("due_date") == day.isoformat()]
     items = []
-    for vehicle in load_vehicles():
-        if vehicle.get("due_date") != day.isoformat():
-            continue
-        enriched = enrich_vehicle(vehicle)
+    for enriched in enrich_vehicles(due_vehicles):
         items.append(
             {
                 **enriched,
@@ -145,6 +143,48 @@ def api_due():
             }
         )
     return jsonify({"ok": True, "date": day.isoformat(), "count": len(items), "items": items})
+
+
+@app.get("/api/unmatched")
+def api_unmatched():
+    """当前车辆档案中未匹配到门店清单的车辆及按店代码汇总。"""
+    items: list[dict] = []
+    groups: dict[str, dict] = {}
+    for enriched in enrich_vehicles(load_vehicles()):
+        if not enriched.get("unmatched"):
+            continue
+        code = str(enriched.get("store_code") or "").strip()
+        store_name = str(enriched.get("store") or "").strip()
+        items.append(
+            {
+                "vin": mask_vin(enriched.get("vin")),
+                "store_code": code,
+                "store": store_name,
+                "store_name": store_name,
+                "delivery_date": enriched.get("delivery_date") or "",
+                "due_date": enriched.get("due_date") or "",
+            }
+        )
+        key = code.upper()
+        group = groups.setdefault(
+            key, {"store_code": code, "store_name": store_name, "count": 0}
+        )
+        group["count"] += 1
+        if not group["store_name"] and store_name:
+            group["store_name"] = store_name
+    grouped = sorted(groups.values(), key=lambda item: (-item["count"], item["store_code"]))
+    counts = {item["store_code"]: item["count"] for item in grouped}
+    return jsonify(
+        {
+            "ok": True,
+            "count": len(items),
+            "items": items,
+            "by_store_code": counts,
+            "counts_by_store_code": counts,
+            "counts": counts,
+            "groups": grouped,
+        }
+    )
 
 
 @app.post("/api/upload")

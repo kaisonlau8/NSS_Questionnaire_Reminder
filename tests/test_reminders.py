@@ -32,7 +32,7 @@ def patched(monkeypatch):
         marked: list[str] = []
         logs: list[dict] = []
         monkeypatch.setattr(reminder, "due_on", lambda day=None: [dict(v) for v in vehicles])
-        monkeypatch.setattr(reminder, "enrich_vehicle", lambda v, stores=None: dict(v))
+        monkeypatch.setattr(reminder, "enrich_vehicles", lambda vs, stores=None: [dict(v) for v in vs])
         monkeypatch.setattr(reminder, "load_settings", lambda: settings)
         if patch_recipients:
             monkeypatch.setattr(reminder, "recipients_for", lambda vehicle: [])
@@ -197,6 +197,25 @@ def test_recipients_managers_and_supervisors_in_run(patched, monkeypatch):
 
 def test_unmatched_store_sends_nothing(patched, monkeypatch):
     vehicle = make_vehicle("LSVNOMATCH0000001", unmatched=True)
+    sent, marked, _ = patched([vehicle], patch_recipients=False)
+    result = reminder.run_reminders(day="2026-01-01", dry_run=False)
+
+    assert sent == []
+    assert marked == []
+    assert result["unmatched"] == 1
+    item = result["items"][0]
+    assert item["status"] == "failed"
+    assert item["recipients"] == []
+    assert any("未匹配" in e for e in item["errors"])
+
+
+def test_unmatched_vehicle_never_sends_even_if_recipients_present(patched):
+    vehicle = make_vehicle(
+        "LSVNOMATCH0000002",
+        unmatched=True,
+        managers=[{"name": "经理A", "open_id": "ou_manager_a"}],
+        supervisors=[{"name": "督导C", "open_id": "ou_supervisor_c"}],
+    )
     sent, marked, _ = patched([vehicle], patch_recipients=False)
     result = reminder.run_reminders(day="2026-01-01", dry_run=False)
 
