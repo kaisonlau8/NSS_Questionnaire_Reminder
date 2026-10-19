@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import unicodedata
 from typing import Any
 
 import requests
@@ -17,14 +19,32 @@ ensure_beijing_tz()
 load_dotenv(ROOT / ".env")
 
 STORE_NAME_KEYS = ("店名称", "门店名称", "交付门店", "门店", "店名", "用户中心")
-MANAGER_KEYS = ("门店售后业务负责人", "门店服务经理", "服务经理", "售后服务经理", "服务顾问经理")
+MANAGER_FIELD = "门店售后业务负责人"
+MANAGER_PHONE_FIELD = "售后业务负责人手机号"
+MANAGER_ALIAS_KEYS = ("门店服务经理", "服务经理", "售后服务经理", "服务顾问经理")
+MANAGER_PHONE_ALIAS_KEYS = ("服务经理电话", "经理电话")
+MANAGER_SLOT_KEYS = {
+    1: (f"{MANAGER_FIELD} 1", f"{MANAGER_FIELD}1", MANAGER_FIELD, *MANAGER_ALIAS_KEYS),
+    2: (f"{MANAGER_FIELD} 2", f"{MANAGER_FIELD}2"),
+    3: (f"{MANAGER_FIELD} 3", f"{MANAGER_FIELD}3"),
+    4: (f"{MANAGER_FIELD} 4", f"{MANAGER_FIELD}4"),
+}
+MANAGER_PHONE_SLOT_KEYS = {
+    1: (f"{MANAGER_PHONE_FIELD} 1", f"{MANAGER_PHONE_FIELD}1", MANAGER_PHONE_FIELD, *MANAGER_PHONE_ALIAS_KEYS),
+    2: (f"{MANAGER_PHONE_FIELD} 2", f"{MANAGER_PHONE_FIELD}2"),
+    3: (f"{MANAGER_PHONE_FIELD} 3", f"{MANAGER_PHONE_FIELD}3"),
+    4: (f"{MANAGER_PHONE_FIELD} 4", f"{MANAGER_PHONE_FIELD}4"),
+}
+MANAGER_KEYS = tuple(dict.fromkeys(key for slot in range(1, 5) for key in MANAGER_SLOT_KEYS[slot]))
+MANAGER_PHONE_KEYS = tuple(
+    dict.fromkeys(key for slot in range(1, 5) for key in MANAGER_PHONE_SLOT_KEYS[slot])
+)
 SUPERVISOR_KEYS = ("督导", "服务督导", "督导姓名", "区域督导", "售后督导")
 REGION_KEYS = ("区域", "战区", "大区")
 CODE_KEYS = ("店代码", "门店编码", "店代码", "编码")
 ALIAS_KEYS = ("门店全称", "原门店名称")
 PERSON_KEYS = ("督导", "督导姓名", "姓名", "提醒人", "人员")
 STORE_LINK_KEYS = ("门店", "负责门店", "门店名称", "交付门店")
-MANAGER_PHONE_KEYS = ("售后业务负责人手机号", "服务经理电话", "经理电话")
 SUPERVISOR_PHONE_KEYS = ("督导手机号", "督导飞书电话号", "飞书电话号", "督导电话", "电话")
 
 
@@ -183,10 +203,89 @@ def _attach_phone(people: list[dict[str, str]], phone: str) -> list[dict[str, st
     return people
 
 
+def _norm_field_name(value: Any) -> str:
+    """字段名去掉所有空白，兼容「负责人 1」「负责人1」等写法。"""
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(value or "")))
+
+
+def _has_field_value(value: Any) -> bool:
+    if value is None or value is False or value == "" or value == [] or value == {}:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_has_field_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(
+            _has_field_value(value.get(key))
+            for key in ("text", "name", "en_name", "id", "open_id")
+        )
+    return True
+
+
+def _slot_field(fields: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    """按候选字段顺序取值，字段名忽略空白；空值继续尝试下一个候选。"""
+    for key in keys:
+        if key in fields and _has_field_value(fields[key]):
+            return fields[key]
+    normalized = {
+        _norm_field_name(key): raw
+        for key, raw in fields.items()
+        if _has_field_value(raw)
+    }
+    for key in keys:
+        normalized_key = _norm_field_name(key)
+        if normalized_key in normalized:
+            return normalized[normalized_key]
+    return None
+
+
+def _managers_from_fields(fields: dict[str, Any]) -> list[dict[str, str]]:
+    """按 1..4 槽位收集售后负责人，并按 open_id（缺失时姓名）跨槽去重。
+
+    1 号槽位：编号字段（人或手机号任一非空）整体优先，全空时才整体使用旧字段/别名，
+    不把两个人的姓名、open_id、手机号拼在一起。重复的人把缺的手机号/open_id 补到先出现的那条上。
+    """
+    managers: list[dict[str, str]] = []
+    index: dict[str, dict[str, str]] = {}
+    for slot in range(1, 5):
+        name_keys = MANAGER_SLOT_KEYS[slot]
+        phone_keys = MANAGER_PHONE_SLOT_KEYS[slot]
+        if slot == 1:
+            numbered_names, legacy_names = name_keys[:2], name_keys[2:]
+            numbered_phones, legacy_phones = phone_keys[:2], phone_keys[2:]
+            if _slot_field(fields, numbered_names) is not None or _slot_field(fields, numbered_phones) is not None:
+                name_keys, phone_keys = numbered_names, numbered_phones
+            else:
+                name_keys, phone_keys = legacy_names, legacy_phones
+        value = _slot_field(fields, name_keys)
+        phone = field_text(_slot_field(fields, phone_keys))
+        if value is None and not phone:
+            continue
+        people = _attach_phone(_people_from_text(value), phone) if value is not None else [{"name": "", "open_id": "", "phone": phone}]
+        for person in people:
+            name = str(person.get("name") or "").strip()
+            open_id = str(person.get("open_id") or "").strip()
+            person_phone = str(person.get("phone") or "").strip()
+            key = open_id or name or person_phone  # 只有手机号也保留，后续按手机号解析 open_id
+            if not key:
+                continue
+            if key in index:
+                kept = index[key]
+                kept["open_id"] = kept["open_id"] or open_id
+                kept["phone"] = kept["phone"] or person_phone
+                continue
+            item = {"name": name, "open_id": open_id, "phone": person_phone}
+            index[key] = item
+            managers.append(item)
+    return managers
+
+
 def records_to_stores(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     stores: list[dict[str, Any]] = []
     for fields in records:
-        name = field_text(_pick_field(fields, STORE_NAME_KEYS))
+        code = field_text(_pick_field(fields, CODE_KEYS))
+        name = field_text(_pick_field(fields, STORE_NAME_KEYS)) or code
         if not name:
             continue
         aliases: list[str] = []
@@ -194,10 +293,8 @@ def records_to_stores(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             alias = field_text(fields.get(key))
             if alias and alias not in aliases and alias != name:
                 aliases.append(alias)
-        managers = _attach_phone(
-            _people_from_text(_pick_field(fields, MANAGER_KEYS)),
-            field_text(_pick_field(fields, MANAGER_PHONE_KEYS)),
-        )
+        managers = _managers_from_fields(fields)
+        primary_manager = dict(managers[0]) if managers else {}
         supervisors = _attach_phone(
             _people_from_text(_pick_field(fields, SUPERVISOR_KEYS)),
             field_text(_pick_field(fields, SUPERVISOR_PHONE_KEYS)),
@@ -206,9 +303,10 @@ def records_to_stores(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             {
                 "name": name,
                 "aliases": aliases,
-                "code": field_text(_pick_field(fields, CODE_KEYS)),
+                "code": code,
                 "region": field_text(_pick_field(fields, REGION_KEYS)),
                 "managers": managers,
+                "primary_manager": primary_manager,
                 "supervisors": supervisors,
                 "raw_fields": sorted(fields.keys()),
             }
@@ -329,10 +427,12 @@ def sync_all() -> dict[str, Any]:
     stores = records_to_stores(store_records)
     supervisors = _supervisors_from_stores(stores)
     resolved = resolve_people_open_ids(stores, supervisors)
+    for store in stores:  # 解析 open_id 后主负责人与 managers[0] 保持一致
+        store["primary_manager"] = dict(store["managers"][0]) if store.get("managers") else {}
     missing_managers = [
         f"{store.get('code') or ''} {store.get('name') or ''}".strip()
         for store in stores
-        if not any((p.get("open_id") or p.get("phone")) for p in (store.get("managers") or []))
+        if not store.get("managers")
     ]
     for label in missing_managers:
         print(f"[nss-sync] 无售后负责人，该店到期车不发给服务经理: {label}")

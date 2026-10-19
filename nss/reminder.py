@@ -11,7 +11,7 @@ from typing import Any
 from nss.eligibility import ineligible_reason, mask_vin
 from nss.feishu_client import send_text_message
 from nss.jsonutil import load_json, save_json
-from nss.matching import enrich_vehicle
+from nss.matching import enrich_vehicles
 from nss.paths import JOB_LOG_PATH, SENT_PATH
 from nss.settings import load_settings
 from nss.time_utils import beijing_iso, beijing_strftime, beijing_today
@@ -108,7 +108,7 @@ def parse_day(value: str | None) -> date:
 def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool = False) -> dict[str, Any]:
     target = parse_day(day)
     settings = load_settings()
-    due = [enrich_vehicle(v) for v in due_on(target)]
+    due = enrich_vehicles(due_on(target))
     results: list[dict[str, Any]] = []
     sent = 0
     skipped = 0
@@ -137,7 +137,22 @@ def run_reminders(*, day: str | None = None, dry_run: bool = False, force: bool 
             print(f"[nss] 已排除 {mask_vin(vehicle.get('vin'))}：{reason}")
             continue
         if vehicle.get("unmatched"):
+            # 未匹配门店的车辆绝不发送，单独计数并在结果中列出原因
             unmatched += 1
+            results.append(
+                {
+                    "vin": vehicle.get("vin"),
+                    "store": vehicle.get("store"),
+                    "unmatched": True,
+                    "match_method": "none",
+                    "recipients": [],
+                    "message": build_message(vehicle),
+                    "actions": [],
+                    "status": "failed",
+                    "errors": ["门店未匹配，无服务经理/督导"],
+                }
+            )
+            continue
         recs = recipients_for(vehicle)
         text = build_message(vehicle)
         item = {
