@@ -1,9 +1,13 @@
 """周报口径、只读分页、Excel、dry-run、调度及真实 SSO 请求钩子的回归测试。"""
 
 import copy
+import fcntl
+import importlib
 import json
 import sqlite3
-from datetime import date, datetime
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
 from unittest.mock import Mock
 
 import pytest
@@ -41,6 +45,7 @@ def isolated_settings(tmp_path, monkeypatch):
     for name in (
         "NSS_WEEKLY_BITABLE_APP_TOKEN", "NSS_WEEKLY_BITABLE_TABLE_ID", "NSS_WEEKLY_BITABLE_VIEW_ID",
         "NSS_WEEKLY_CHAT_ID", "NSS_WEEKLY_LINK_BASE", "NSS_PUBLIC_BASE_URL", "NSS_WEEKLY_DATA_DIR",
+        "NSS_WEEKLY_STATE_PATH", "NSS_WEEKLY_SENDING_TIMEOUT_SECONDS",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("NSS_DMS_REGION_DB", str(tmp_path / "missing.sqlite3"))
@@ -246,6 +251,8 @@ def test_settings_defaults_merge_nested_updates_and_reject_before_saving():
     defaults = settings_mod.load_settings()["weekly_report"]
     assert defaults["enabled"] is False and defaults["dry_run"] is True
     assert (defaults["weekday"], defaults["hour"], defaults["minute"]) == (0, 9, 30)
+    assert defaults["state_path"] == "weekly_report_state.json"
+    assert defaults["sending_timeout_seconds"] == 21600
     settings_mod.save_settings({"weekly_report": {"filters": {"period_value": "100天"}}})
     settings_mod.save_settings({"weekly_report": {"minute": 31}})
     current = settings_mod.load_settings()["weekly_report"]
@@ -265,15 +272,19 @@ def test_source_chat_and_link_settings_support_environment_overrides(monkeypatch
     monkeypatch.setenv("NSS_WEEKLY_BITABLE_VIEW_ID", "")
     monkeypatch.setenv("NSS_WEEKLY_CHAT_ID", "local-chat")
     monkeypatch.setenv("NSS_WEEKLY_LINK_BASE", "http://127.0.0.1:9005")
+    monkeypatch.setenv("NSS_WEEKLY_STATE_PATH", "local-state.json")
+    monkeypatch.setenv("NSS_WEEKLY_SENDING_TIMEOUT_SECONDS", "3600")
     cfg = settings_mod.load_settings()["weekly_report"]
     assert cfg["source"] == {"app_token": "local-app", "table_id": "local-table", "view_id": ""}
     assert cfg["chat_id"] == "local-chat"
     assert cfg["link_base"] == "http://127.0.0.1:9005"
+    assert cfg["state_path"] == "local-state.json"
+    assert cfg["sending_timeout_seconds"] == 3600
     assert cfg["dry_run"] is True and cfg["enabled"] is False
 
 
 def test_scheduler_fires_previous_completed_week_once_and_defaults_to_disabled(monkeypatch):
-    run = Mock()
+    run = Mock(return_value={"skipped": False})
     monkeypatch.setattr(scheduler, "run_weekly_report", run)
     settings = settings_mod.load_settings()
     now = datetime(2026, 10, 26, 9, 30, tzinfo=BEIJING_TZ)
@@ -342,6 +353,10 @@ def test_dry_run_writes_brief_and_excel_without_any_send_or_auth_call(tmp_path, 
     assert (tmp_path / "out" / f"{WEEK}_brief.txt").read_text() == result["brief"] + "\n"
     assert (tmp_path / "out" / f"{WEEK}_weekly.xlsx").is_file()
     assert not (source / "weekly_reports").exists()
+    entry = json.loads((source / "weekly_report_state.json").read_text())[WEEK]
+    assert entry["status"] == "dry_run"
+    assert entry["chat_id"] == settings_mod.load_settings()["weekly_report"]["chat_id"]
+    assert datetime.fromisoformat(entry["at"]).utcoffset() == timedelta(hours=8)
     send.assert_not_called()
     post.assert_not_called()
     fetch.assert_not_called()
@@ -392,6 +407,7 @@ def test_runner_uses_readonly_source_and_explicit_group_send_is_mocked(tmp_path,
     fetch.assert_called_once_with(cfg["table_id"], cfg["view_id"], app_token=cfg["app_token"], raw_items=True)
     send.assert_called_once_with("oc-local-test", result["brief"])
     assert result["message"] == {"message_id": "mock-message"}
+    assert json.loads((source / "weekly_report_state.json").read_text())[WEEK]["message_id"] == "mock-message"
 
 
 def test_missing_local_input_fails_without_network(tmp_path, monkeypatch):
@@ -400,6 +416,309 @@ def test_missing_local_input_fails_without_network(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError):
         weekly.run_weekly_report(WEEK, sent_log_path=tmp_path / "missing.json", rows_json_path=tmp_path / "rows.json")
     fetch.assert_not_called()
+
+
+@pytest.fixture
+def offline_run(tmp_path, monkeypatch):
+    source, rows_path = offline_inputs(tmp_path)
+    settings_mod.save_settings({"weekly_report": {"chat_id": "oc-local-test"}})
+    send = Mock(return_value={"message_id": "mock-message"})
+    monkeypatch.setattr(weekly, "send_chat_text", send)
+    monkeypatch.setattr(weekly, "fetch_records", Mock(side_effect=AssertionError("offline must not fetch")))
+
+    def run(week=WEEK, **overrides):
+        options = {
+            "dry_run": False, "data_dir": source,
+            "rows_json_path": rows_path, "out_dir": tmp_path / "out",
+            **overrides,
+        }
+        return weekly.run_weekly_report(week, **options)
+
+    return run, source, send
+
+
+def test_sent_week_survives_runner_reload_without_fetch_or_send(offline_run, monkeypatch):
+    run, source, send = offline_run
+    first = run()
+    path = source / "weekly_report_state.json"
+    before = path.read_bytes()
+    assert first["skipped"] is False
+    assert json.loads(before)[WEEK] == {
+        "status": "sent", "chat_id": "oc-local-test", "message_id": "mock-message",
+        "at": json.loads(before)[WEEK]["at"],
+    }
+    importlib.reload(weekly)
+    monkeypatch.setattr(weekly, "send_chat_text", send)
+    generate = Mock(side_effect=AssertionError("sent week must skip before reading inputs / fetching"))
+    monkeypatch.setattr(weekly, "_generate_report_files", generate)
+    settings_mod.save_settings({"weekly_report": {"chat_id": "oc-another-local-chat"}})
+    second = run()
+    assert second["skipped"] is True and second["skip_reason"] == "sent"
+    assert second["message"] is None
+    assert path.read_bytes() == before
+    send.assert_called_once()
+    generate.assert_not_called()
+
+
+def test_scheduler_restart_deduplicates_and_does_not_report_skipped_as_success(offline_run, monkeypatch):
+    _, source, send = offline_run
+    settings_mod.save_settings({"weekly_report": {"enabled": True, "dry_run": False}})
+    cfg = settings_mod.load_settings()
+    monkeypatch.setenv("NSS_WEEKLY_DATA_DIR", str(source))
+    monkeypatch.setattr(weekly, "WEEKLY_REPORT_DIR", source / "reports")
+    monkeypatch.setattr(weekly, "fetch_records", Mock(return_value=[row("a")]))
+    monkeypatch.setitem(scheduler._state, "last_weekly_report", "")
+    now = datetime(2026, 10, 26, 9, 30, tzinfo=BEIJING_TZ)
+    scheduler._run_weekly_if_due(now, cfg, {})
+    assert scheduler._state["last_weekly_report"]
+    # 模拟重启：新 fired、丢失进程内状态，但保留磁盘周键。
+    scheduler._state["last_weekly_report"] = ""
+    scheduler._run_weekly_if_due(now.replace(second=20), cfg, {})
+    assert scheduler._state["last_weekly_report"] == ""
+    send.assert_called_once()
+    weekly.fetch_records.assert_called_once()
+
+
+@pytest.mark.parametrize("late", [(26, 9, 31), (26, 15, 0), (27, 9, 30)])
+def test_scheduler_does_not_catch_up_after_missed_trigger(monkeypatch, late):
+    cfg = settings_mod.load_settings()
+    cfg["weekly_report"]["enabled"] = True
+    run = Mock()
+    monkeypatch.setattr(scheduler, "run_weekly_report", run)
+    day, hour, minute = late
+    scheduler._run_weekly_if_due(datetime(2026, 10, day, hour, minute, tzinfo=BEIJING_TZ), cfg, {})
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_concurrent_calls_with_two_lock_handles_only_send_once(offline_run, force, caplog):
+    run, source, send = offline_run
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked_sender(chat_id, brief):
+        # 此时发送仍在进行，预占状态必须已经从磁盘可见。
+        entry = json.loads((source / "weekly_report_state.json").read_text())[WEEK]
+        assert entry["status"] == "sending" and entry["chat_id"] == chat_id
+        entered.set()
+        assert release.wait(timeout=10)
+        return {"message_id": "mock-concurrent"}
+
+    send.side_effect = blocked_sender
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        first = pool.submit(run)
+        try:
+            assert entered.wait(timeout=10)
+            second = run(force=force)
+            assert second["skipped"] is True and second["skip_reason"] == "locked"
+        finally:
+            release.set()
+        assert first.result(timeout=10)["skipped"] is False
+    assert "locked" in caplog.text
+    send.assert_called_once()
+    assert json.loads((source / "weekly_report_state.json").read_text())[WEEK]["status"] == "sent"
+    assert run()["skip_reason"] == "sent"
+
+
+def test_locked_call_skips_before_inputs_and_releases_on_close(offline_run, monkeypatch):
+    run, source, send = offline_run
+    generate = Mock(side_effect=AssertionError("locked must not generate"))
+    with (source / "weekly_report.lock").open("a") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with monkeypatch.context() as patch:
+            patch.setattr(weekly, "_generate_report_files", generate)
+            assert run(dry_run=True)["skip_reason"] == "locked"
+        generate.assert_not_called()
+        send.assert_not_called()
+        assert not (source / "weekly_report_state.json").exists()
+    assert run()["skipped"] is False
+    assert (source / "weekly_report.lock").is_file()
+    send.assert_called_once()
+
+
+def test_dry_run_does_not_occupy_real_send_and_week_keys_are_independent(offline_run):
+    run, source, send = offline_run
+    path = source / "weekly_report_state.json"
+    assert run(dry_run=True)["dry_run"] is True
+    assert json.loads(path.read_text())[WEEK]["status"] == "dry_run"
+    send.assert_not_called()
+    assert run()["skipped"] is False
+    assert run("2026-10-12")["skipped"] is False
+    state = json.loads(path.read_text())
+    assert set(state) == {WEEK, "2026-10-12"}
+    assert all(entry["status"] == "sent" for entry in state.values())
+    assert send.call_count == 2
+
+
+@pytest.mark.parametrize("status", ["sent", "sending"])
+def test_dry_run_never_erases_real_send_marker_even_with_force(offline_run, status):
+    run, source, send = offline_run
+    path = source / "weekly_report_state.json"
+    previous = {WEEK: {"status": status, "chat_id": "oc-original", "at": weekly.beijing_now().isoformat()}}
+    path.write_text(json.dumps(previous), encoding="utf-8")
+    before = path.read_bytes()
+    assert run(dry_run=True, force=True)["skipped"] is False
+    assert path.read_bytes() == before
+    assert run()["skip_reason"] == status
+    send.assert_not_called()
+
+
+@pytest.mark.parametrize("timeout,age,can_send", [
+    (21600, 21599, False), (21600, 21600, True), (21600, 21601, True),
+    (60, 59, False), (60, 60, True), (60, -1, False), (60, None, False),
+])
+def test_sending_timeout_is_configurable_and_conservative(offline_run, monkeypatch, timeout, age, can_send):
+    run, source, send = offline_run
+    now = datetime(2026, 10, 26, 15, 30, tzinfo=BEIJING_TZ)
+    monkeypatch.setattr(weekly, "beijing_now", lambda: now)
+    settings_mod.save_settings({"weekly_report": {"sending_timeout_seconds": timeout}})
+    at = (now - timedelta(seconds=age)).isoformat() if age is not None else "invalid"
+    path = source / "weekly_report_state.json"
+    path.write_text(json.dumps({WEEK: {"status": "sending", "chat_id": "oc-previous", "at": at}}))
+    before = path.read_bytes()
+    result = run()
+    if can_send:
+        assert result["skipped"] is False
+        assert json.loads(path.read_text())[WEEK]["status"] == "sent"
+        send.assert_called_once()
+    else:
+        assert result["skip_reason"] == "sending"
+        assert path.read_bytes() == before
+        send.assert_not_called()
+
+
+def test_send_failure_records_failed_and_allows_retry(offline_run):
+    run, source, send = offline_run
+    send.side_effect = RuntimeError("mock send failure")
+    with pytest.raises(RuntimeError, match="mock send failure"):
+        run()
+    entry = json.loads((source / "weekly_report_state.json").read_text())[WEEK]
+    assert entry["status"] == "failed" and entry["chat_id"] == "oc-local-test"
+    send.side_effect = None
+    assert run()["skipped"] is False
+    assert send.call_count == 2
+
+
+@pytest.mark.parametrize("status", ["sent", "sending"])
+def test_failed_forced_send_preserves_previous_real_send_marker(offline_run, status):
+    run, source, send = offline_run
+    path = source / "weekly_report_state.json"
+    previous = {WEEK: {"status": status, "chat_id": "oc-original", "at": weekly.beijing_now().isoformat()}}
+    path.write_text(json.dumps(previous))
+    send.side_effect = RuntimeError("mock forced send failure")
+    with pytest.raises(RuntimeError, match="mock forced send failure"):
+        run(force=True)
+    assert json.loads(path.read_text()) == previous
+    assert run()["skip_reason"] == status
+    send.assert_called_once()
+
+
+def test_pre_send_persistence_failure_never_sends(offline_run, monkeypatch):
+    run, source, send = offline_run
+    run(dry_run=True)
+    path = source / "weekly_report_state.json"
+    before = path.read_bytes()
+    monkeypatch.setattr(weekly, "save_state", Mock(side_effect=OSError("mock disk failure")))
+    with pytest.raises(OSError, match="mock disk failure"):
+        run()
+    assert path.read_bytes() == before
+    send.assert_not_called()
+
+
+def test_successful_send_followed_by_persistence_failure_keeps_sending(offline_run, monkeypatch):
+    run, source, send = offline_run
+    save = weekly.save_state
+
+    def fail_sent(path, state):
+        if state[WEEK]["status"] == "sent":
+            raise OSError("mock final persistence failure")
+        save(path, state)
+
+    monkeypatch.setattr(weekly, "save_state", fail_sent)
+    with pytest.raises(OSError, match="mock final persistence failure"):
+        run()
+    assert json.loads((source / "weekly_report_state.json").read_text())[WEEK]["status"] == "sending"
+    assert run()["skip_reason"] == "sending"
+    send.assert_called_once()
+
+
+def test_interrupted_send_keeps_sending_for_next_invocation(offline_run):
+    run, source, send = offline_run
+    send.side_effect = SystemExit("mock process interrupted")
+    with pytest.raises(SystemExit, match="mock process interrupted"):
+        run()
+    assert json.loads((source / "weekly_report_state.json").read_text())[WEEK]["status"] == "sending"
+    assert run()["skip_reason"] == "sending"
+    send.assert_called_once()
+
+
+@pytest.mark.parametrize("configured,environment,explicit,expected", [
+    ("weekly_report_state.json", None, None, "weekly_report_state.json"),
+    ("custom/state.json", None, None, "custom/state.json"),
+    ("ignored.json", "env/state.json", None, "env/state.json"),
+    ("ignored.json", "ignored-env.json", "cli/state.json", "cli/state.json"),
+    ("ignored.json", "ignored-env.json", "absolute", "absolute"),
+])
+def test_state_path_precedence_and_adjacent_lock(offline_run, tmp_path, monkeypatch, configured, environment, explicit, expected):
+    run, source, _ = offline_run
+    settings_mod.save_settings({"weekly_report": {"state_path": configured}})
+    if environment is not None:
+        monkeypatch.setenv("NSS_WEEKLY_STATE_PATH", environment)
+    if explicit == "absolute":
+        explicit = tmp_path / "independent-state" / "state.json"
+        path = explicit
+    else:
+        path = source / expected
+    result = run(state_path=explicit)
+    assert result["state_path"] == str(path)
+    assert json.loads(path.read_text())[WEEK]["status"] == "sent"
+    assert (path.parent / "weekly_report.lock").is_file()
+    if path != source / "weekly_report_state.json":
+        assert not (source / "weekly_report_state.json").exists()
+
+
+@pytest.mark.parametrize("invalid", [0, -1, True, 0.5, "invalid", ""])
+def test_invalid_sending_timeout_rejected_before_saving(invalid):
+    settings_mod.save_settings({})
+    before = settings_mod.SETTINGS_PATH.read_bytes()
+    with pytest.raises(ValueError, match="正整数秒数"):
+        settings_mod.save_settings({"weekly_report": {"sending_timeout_seconds": invalid}})
+    assert settings_mod.SETTINGS_PATH.read_bytes() == before
+
+
+@pytest.mark.parametrize("payload", ["{", "[]", '{"2026-10-19": []}', '{"2026-10-19": {"status": "unknown"}}'])
+def test_malformed_state_fails_closed_without_send(offline_run, payload):
+    run, source, send = offline_run
+    path = source / "weekly_report_state.json"
+    path.write_text(payload)
+    with pytest.raises(ValueError):
+        run(force=True)
+    assert path.read_text() == payload
+    send.assert_not_called()
+
+
+def test_cli_send_and_force_share_persistent_deduplication(tmp_path, monkeypatch, capsys):
+    source, rows_path = offline_inputs(tmp_path)
+    send = Mock(return_value={"message_id": "mock-cli"})
+    monkeypatch.setattr(weekly, "send_chat_text", send)
+    args = [
+        "--send", "--week", WEEK, "--data-dir", str(source),
+        "--rows-json", str(rows_path), "--out", str(tmp_path / "out"),
+        "--state-path", "manual-state.json",
+    ]
+    assert weekly.main(args) == 0
+    assert "模式：已发送" in capsys.readouterr().out
+    assert weekly.main(args) == 0
+    assert "该周已发送" in capsys.readouterr().out
+    send.assert_called_once()
+    assert weekly.main([*args, "--force"]) == 0
+    assert send.call_count == 2
+    assert json.loads((source / "manual-state.json").read_text())[WEEK]["status"] == "sent"
+
+
+def test_cli_send_and_dry_run_are_mutually_exclusive():
+    with pytest.raises(SystemExit) as exc:
+        weekly.main(["--send", "--dry-run"])
+    assert exc.value.code == 2
 
 
 def response(payload):

@@ -59,8 +59,14 @@ def _run_weekly_if_due(now: datetime, settings: dict[str, Any], fired: dict[str,
             or fired.get("weekly_report") == today):
         return
     fired["weekly_report"] = today
-    if _safe_call("weekly-report", lambda: run_weekly_report(previous_week_start(now.date()), dry_run=cfg["dry_run"])):
-        _state["last_weekly_report"] = beijing_strftime("%Y-%m-%d %H:%M:%S")
+
+    def run() -> None:
+        # 持久化周键与跨进程锁统一在执行入口检查；这里只保留同进程触发节流。
+        result = run_weekly_report(previous_week_start(now.date()), dry_run=cfg["dry_run"])
+        if not result.get("skipped"):
+            _state["last_weekly_report"] = beijing_strftime("%Y-%m-%d %H:%M:%S")
+
+    _safe_call("weekly-report", run)
 
 
 def _loop() -> None:

@@ -16,6 +16,8 @@
     "chat_id": "oc_ba8af247db2e2dc4955b1d01652add82",
     "dry_run": true,
     "link_base": "",
+    "state_path": "weekly_report_state.json",
+    "sending_timeout_seconds": 21600,
     "source": {
       "app_token": "J0BBb0z2ua4bzEs7gumc0YQXn80",
       "table_id": "tblc8vCaxiWyi64Y",

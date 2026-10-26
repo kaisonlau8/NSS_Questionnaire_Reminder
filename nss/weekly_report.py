@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import logging
 import os
 import re
 from collections import defaultdict
@@ -22,9 +23,11 @@ from nss.jsonutil import load_json
 from nss.matching import NO_REGION, enrich_vehicles
 from nss.paths import DATA_DIR, WEEKLY_REPORT_DIR
 from nss.settings import DEFAULT_SETTINGS, load_settings, normalize_weekly_report_settings
-from nss.time_utils import BEIJING_TZ, beijing_today
+from nss.time_utils import BEIJING_TZ, beijing_now, beijing_today
+from nss.weekly_report_state import load_state, report_lock, save_state
 
 REPORT_FILENAME_RE = re.compile(r"\d{4}-\d{2}-\d{2}_weekly\.xlsx")
+logger = logging.getLogger(__name__)
 
 
 def normalize_vin(value: Any) -> str:
@@ -346,25 +349,17 @@ def _enrich_sent_log(sent_log: Any, data_dir: Path, region_db: str | Path | None
     return {"items": items}
 
 
-def run_weekly_report(
-    week_start: str | date | None = None,
+def _generate_report_files(
+    monday: date,
     *,
-    dry_run: bool | None = None,
-    sent_log_path: Path | str | None = None,
-    rows_json_path: Path | str | None = None,
-    data_dir: Path | str | None = None,
-    out_dir: Path | str | None = None,
-    region_db: Path | str | None = None,
+    settings: dict[str, Any],
+    cfg: dict[str, Any],
+    source_dir: Path,
+    sent_log_path: Path | str | None,
+    rows_json_path: Path | str | None,
+    out_dir: Path | str | None,
+    region_db: Path | str | None,
 ) -> dict[str, Any]:
-    settings = load_settings()
-    cfg = normalize_weekly_report_settings(settings.get("weekly_report", {}))
-    dry_run = cfg["dry_run"] if dry_run is None else dry_run
-    if not isinstance(dry_run, bool):
-        raise ValueError("dry_run 必须是布尔值")
-    monday = _monday(week_start if week_start is not None else previous_week_start())
-    source_dir = Path(data_dir or os.getenv("NSS_WEEKLY_DATA_DIR") or (
-        Path(sent_log_path).parent if sent_log_path is not None else DATA_DIR
-    )).expanduser()
     sent_path = Path(sent_log_path) if sent_log_path is not None else source_dir / "sent_log.json"
     if not sent_path.is_file():
         raise FileNotFoundError(f"找不到提醒日志：{sent_path}")
@@ -388,35 +383,135 @@ def run_weekly_report(
     temporary = brief_path.with_suffix(".txt.tmp")
     temporary.write_text(brief + "\n", encoding="utf-8")
     temporary.replace(brief_path)
-    # 只在明确关闭 dry-run 时进入发送分支；离线 dry-run 不触发任何 API。
-    message = None
-    if not dry_run:
-        message = send_chat_text(cfg["chat_id"], brief)
     return {
-        "ok": True, "dry_run": dry_run, "report": report, "brief": brief,
+        "report": report, "brief": brief,
         "excel_path": str(excel_path), "brief_path": str(brief_path),
-        "download_url": download_url, "message": message,
+        "download_url": download_url,
     }
+
+
+def run_weekly_report(
+    week_start: str | date | None = None,
+    *,
+    dry_run: bool | None = None,
+    force: bool = False,
+    state_path: Path | str | None = None,
+    sent_log_path: Path | str | None = None,
+    rows_json_path: Path | str | None = None,
+    data_dir: Path | str | None = None,
+    out_dir: Path | str | None = None,
+    region_db: Path | str | None = None,
+) -> dict[str, Any]:
+    """调度与 CLI 共用锁内检查、生成、发送、落盘，重启不丢失已发送周键。"""
+    settings = load_settings()
+    cfg = normalize_weekly_report_settings(settings.get("weekly_report", {}))
+    dry_run = cfg["dry_run"] if dry_run is None else dry_run
+    if not isinstance(dry_run, bool) or not isinstance(force, bool):
+        raise ValueError("dry_run / force 必须是布尔值")
+    monday = _monday(week_start if week_start is not None else previous_week_start())
+    week = monday.isoformat()
+    source_dir = Path(data_dir or os.getenv("NSS_WEEKLY_DATA_DIR") or (
+        Path(sent_log_path).parent if sent_log_path is not None else DATA_DIR
+    )).expanduser()
+    state_file = Path(state_path if state_path is not None else cfg["state_path"]).expanduser()
+    if not state_file.is_absolute():
+        state_file = source_dir / state_file
+    state_file = state_file.resolve()
+    result = {
+        "ok": True, "dry_run": dry_run, "skipped": False, "week_start": week,
+        "state_path": str(state_file), "message": None,
+    }
+
+    def skipped(reason: str) -> dict[str, Any]:
+        logger.warning("周报 %s 跳过：%s（状态文件：%s）", week, reason, state_file)
+        return {**result, "skipped": True, "skip_reason": reason}
+
+    with report_lock(state_file) as acquired:
+        if not acquired:
+            return skipped("locked")
+        state = load_state(state_file)
+        previous = state.get(week)
+        protected = previous is not None and previous["status"] in ("sent", "sending")
+        if not dry_run and not force and previous:
+            if previous["status"] == "sent":
+                return skipped("sent")
+            if previous["status"] == "sending":
+                started = _datetime(previous.get("at"))
+                # 无法解析或未来的时间戳仍占用，避免损坏状态造成重复发送。
+                if started is None or (beijing_now() - started).total_seconds() < cfg["sending_timeout_seconds"]:
+                    return skipped("sending")
+
+        def record(status: str, **extra: Any) -> None:
+            state[week] = {
+                "status": status, "chat_id": cfg["chat_id"],
+                "at": beijing_now().isoformat(timespec="seconds"), **extra,
+            }
+            save_state(state_file, state)
+
+        try:
+            result.update(_generate_report_files(
+                monday, settings=settings, cfg=cfg, source_dir=source_dir,
+                sent_log_path=sent_log_path, rows_json_path=rows_json_path,
+                out_dir=out_dir, region_db=region_db,
+            ))
+        except Exception:
+            if not protected:
+                record("failed")
+            raise
+
+        if dry_run:
+            # 预览不能擦掉已发送或结果不确定的真实发送标记。
+            if not protected:
+                record("dry_run")
+            return result
+
+        # 发送前必须成功落盘；进程中断或发送成功后落盘失败时保留 sending。
+        record("sending")
+        try:
+            message = send_chat_text(cfg["chat_id"], result["brief"])
+        except Exception:
+            if protected:
+                # 强制重发失败不能抹掉以前已发送 / 结果不确定的记录。
+                state[week] = previous
+                save_state(state_file, state)
+            else:
+                record("failed")
+            raise
+        message_id = message.get("message_id") if isinstance(message, dict) else None
+        record("sent", **({"message_id": message_id} if message_id else {}))
+        result["message"] = message
+        return result
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="NSS 上一完整自然周周报（默认 dry-run）")
     parser.add_argument("--week", help="周一日期 YYYY-MM-DD；省略为上一完整周")
-    parser.add_argument("--dry-run", action="store_true", default=None, help="强制只生成本地文件，绝不发送消息")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", dest="dry_run", action="store_const", const=True, default=None,
+                      help="强制只生成本地文件，绝不发送消息")
+    mode.add_argument("--send", dest="dry_run", action="store_const", const=False,
+                      help="明确发送群简报，仍检查持久化周键并获取锁")
+    parser.add_argument("--force", action="store_true", help="跳过 sent / sending 去重，仍需获取锁")
+    parser.add_argument("--state-path", type=Path, help="状态文件；相对路径以周报数据目录为基准，锁与其相邻")
     parser.add_argument("--sent-log", type=Path, help="本地 sent_log.json")
     parser.add_argument("--rows-json", type=Path, help="本地 records API items 列表（或 fields 字典列表）")
-    parser.add_argument("--data-dir", type=Path, help="只读车辆/门店快照目录；默认日志所在目录或项目 data/")
+    parser.add_argument("--data-dir", type=Path, help="车辆/门店快照与默认状态目录；默认日志所在目录或项目 data/")
     parser.add_argument("--region-db", type=Path, help="只读 DMS reportdb 快照；默认 NSS_DMS_REGION_DB")
     parser.add_argument("--out", type=Path, help="产物目录；默认 data/weekly_reports/")
     args = parser.parse_args(argv)
     try:
         result = run_weekly_report(
-            args.week, dry_run=args.dry_run, sent_log_path=args.sent_log,
+            args.week, dry_run=args.dry_run, force=args.force, state_path=args.state_path,
+            sent_log_path=args.sent_log,
             rows_json_path=args.rows_json, data_dir=args.data_dir,
             out_dir=args.out, region_db=args.region_db,
         )
     except (ValueError, OSError, RuntimeError) as exc:
         parser.exit(1, f"周报生成失败：{exc}\n")
+    if result["skipped"]:
+        reasons = {"locked": "锁正被占用", "sent": "该周已发送", "sending": "该周 sending 尚未超时或时间无效"}
+        print(f"周报 {result['week_start']} 已跳过：{reasons[result['skip_reason']]}")
+        return 0
     print(f"模式：{'dry-run' if result['dry_run'] else '已发送'}")
     print(result["brief"])
     print(f"Excel：{result['excel_path']}")

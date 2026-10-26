@@ -28,6 +28,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "chat_id": "oc_ba8af247db2e2dc4955b1d01652add82",
         "dry_run": True,
         "link_base": "",
+        "state_path": "weekly_report_state.json",
+        "sending_timeout_seconds": 21600,
         "source": {
             "app_token": "J0BBb0z2ua4bzEs7gumc0YQXn80",
             "table_id": "tblc8vCaxiWyi64Y",
@@ -85,6 +87,14 @@ def normalize_weekly_report_settings(raw: Any) -> dict[str, Any]:
         cfg[key] = int(cfg[key])
     for key in ("chat_id", "link_base", "nps_field"):
         cfg[key] = str(cfg[key] or "").strip()
+    if not isinstance(cfg["state_path"], str) or not cfg["state_path"].strip():
+        raise ValueError("weekly_report.state_path 必须是非空路径")
+    cfg["state_path"] = cfg["state_path"].strip()
+    timeout = cfg["sending_timeout_seconds"]
+    if (isinstance(timeout, bool) or not isinstance(timeout, (int, str))
+            or not re.fullmatch(r"\d+", str(timeout)) or int(timeout) <= 0):
+        raise ValueError("weekly_report.sending_timeout_seconds 必须是正整数秒数")
+    cfg["sending_timeout_seconds"] = int(timeout)
     for key, value in cfg["source"].items():
         cfg["source"][key] = str(value or "").strip()
         if key != "view_id" and not cfg["source"][key]:
@@ -107,7 +117,7 @@ def _weekly_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
         value = os.getenv(f"NSS_WEEKLY_BITABLE_{key.upper()}")
         if value is not None:
             cfg["source"][key] = value.strip()
-    for key in ("chat_id", "link_base"):
+    for key in ("chat_id", "link_base", "state_path", "sending_timeout_seconds"):
         value = os.getenv(f"NSS_WEEKLY_{key.upper()}")
         if value is not None:
             cfg[key] = value.strip()

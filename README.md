@@ -93,12 +93,14 @@ HeroClaw 必须被加为该 Base 的**文档应用**（飞书 → 右上角「�
     "minute": 30,
     "chat_id": "oc_ba8af247db2e2dc4955b1d01652add82",
     "dry_run": true,
-    "link_base": ""
+    "link_base": "",
+    "state_path": "weekly_report_state.json",
+    "sending_timeout_seconds": 21600
   }
 }
 ```
 
-`weekday` 为 0（周一）至 6（周日）。设置时间必须避开 00:00、08:30、09:00、12:00 的前后 5 分钟，**含端点和跨午夜**；不合法的配置会拒绝保存/启动。默认群为「售后服务运营」。dry-run 只写本地 Excel 和简报，不调用任何群聊/私聊发送 API；只有明确配置 `dry_run=false` 才会发送群简报。
+`weekday` 为 0（周一）至 6（周日）。设置时间必须避开 00:00、08:30、09:00、12:00 的前后 5 分钟，**含端点和跨午夜**；不合法的配置会拒绝保存/启动。默认群为「售后服务运营」。dry-run 写本地 Excel、简报及运行状态，不调用任何群聊/私聊发送 API；明确配置 `dry_run=false` 或使用 CLI `--send` 才会发送群简报。
 
 可调整 `weekly_report.source.{app_token,table_id,view_id}` 和 `weekly_report.filters` 的字段名、类型值、周期值、组合值及兼容字段列表。第 1 题默认按 `1.` / `第1题` 等前缀识别（0~10 整数），也可用 `weekly_report.nps_field` 指定完整字段名。
 
@@ -109,10 +111,36 @@ HeroClaw 必须被加为该 Base 的**文档应用**（飞书 → 右上角「�
 | `NSS_WEEKLY_BITABLE_APP_TOKEN` / `NSS_WEEKLY_BITABLE_TABLE_ID` / `NSS_WEEKLY_BITABLE_VIEW_ID` | 覆盖问卷源 Base / table / view，独立于门店表配置 |
 | `NSS_WEEKLY_CHAT_ID` | 覆盖群 chat_id |
 | `NSS_WEEKLY_LINK_BASE` / `NSS_PUBLIC_BASE_URL` | 周报 / 全站下载链接基址；优先周报基址，均留空则生成站内相对链接 |
-| `NSS_WEEKLY_DATA_DIR` | 周报只读输入快照目录；不改变输出目录或现有提醒系统数据目录 |
+| `NSS_WEEKLY_DATA_DIR` | 周报输入快照与默认状态目录；不改变输出目录或现有提醒系统数据目录 |
+| `NSS_WEEKLY_STATE_PATH` | 覆盖 `weekly_report.state_path`；相对路径以周报数据目录为基准，绝对路径可独立放置状态与锁 |
+| `NSS_WEEKLY_SENDING_TIMEOUT_SECONDS` | 覆盖 `weekly_report.sending_timeout_seconds`，正整数秒数，默认 21600（6 小时） |
 | `NSS_DMS_REGION_DB` | 现有 DMS 区域只读 SQLite 路径，也可通过 CLI `--region-db` 指定快照 |
 
 公网基址仅写未入库的 `.env` / 本机 settings，不提交仓库。
+
+### 持久化去重与并发保护
+
+默认状态文件为 `data/weekly_report_state.json`，以报告的周一日期为键，例如：
+
+```json
+{
+  "2026-10-19": {
+    "status": "sent",
+    "chat_id": "oc-local-example",
+    "at": "2026-10-26T09:30:01+08:00",
+    "message_id": "example-message"
+  }
+}
+```
+
+- 周报数据目录依次取 CLI `--data-dir`、`NSS_WEEKLY_DATA_DIR`、显式 `--sent-log` 的父目录、项目 `data/`。状态路径依次取 CLI `--state-path`、`NSS_WEEKLY_STATE_PATH`、`weekly_report.state_path`，默认文件名为 `weekly_report_state.json`。相对状态路径跟随数据目录；输入 JSON / DMS 快照本身保持只读。快照目录不可写时，用绝对 `--state-path` 指向独立可写目录。
+- 默认锁文件为 `data/weekly_report.lock`；自定义状态路径时，锁固定为**状态文件同目录**的 `weekly_report.lock`。所有调用方必须使用相同状态路径，才能共享去重记录与锁。使用 `fcntl.flock(LOCK_EX | LOCK_NB)`，拿不到锁立即跳过并记录日志。检查周键、生成文件、发送和记录状态均在锁内；`--force` 也不能绕过锁。锁随句柄关闭 / 进程退出释放，锁文件保留，不因文件存在就判为占用。
+- `sent` 永久阻止该周再次真实发送，即使重启或更换目标群也一样；`dry_run`、`failed` 不阻止真实发送。dry-run 可以重新生成文件，但不会覆盖已有 `sent` / `sending`，避免预览清除真实发送标记。
+- 真实发送前，先原子落盘 `sending`；成功返回后**立即**落盘 `sent`，保存返回的 `message_id`（如有）。生成或发送抛出异常时记录 `failed`；已有 `sent` / `sending` 时保留原记录。成功发送后落盘异常或进程中断时，保留此前的 `sending`，不把不确定结果改成可立即重试的 `failed`。
+- `sending` 在 `at` 起的 `sending_timeout_seconds` 内视为占用；默认 6 小时，到达时限后下一次调用才允许重试。未来时间或无法解析的时间仍视为占用。**超时不会主动补发**，且不能据此断定之前未送达；可先核实目标群，再手动调用 CLI。需提前清理时，停止相关周报调用、核实发送结果后，仅删除状态文件中的对应周键；保留其他周记录和锁文件。显式 `--force` 可跳过 `sent` / `sending` 判断。
+- 每次状态更新都使用同目录唯一临时文件，写入后 `flush` + `fsync`，再 `os.replace` 并同步目录。替换前失败不会破坏旧状态；格式损坏的状态文件会报错，不能当成空状态继续发送。
+
+调度器仅在配置的星期、小时、分钟匹配时尝试，进程内同日节流；持久化周键确保触发分钟内重启也不会重复真实发送。**错过触发分钟不自动补发**，失败或锁占用后也不自动追赶，可用下面的 CLI 手动补发。
 
 ### 本地生成与下载
 
@@ -122,9 +150,13 @@ python3 -m nss.weekly_report --week 2026-10-19 --dry-run
 python3 -m nss.weekly_report --week 2026-10-19 --dry-run \
   --sent-log /path/to/snapshot/sent_log.json --rows-json /path/to/nps_items.json \
   --data-dir /path/to/snapshot --out /path/to/output
+# 手动补发（明确发送；与调度器共享周键去重和锁）
+python3 -m nss.weekly_report --send --week 2026-10-19
+# 核实后强制重发（跳过 sent / sending 去重，仍须获取锁）
+python3 -m nss.weekly_report --send --week 2026-10-19 --force
 ```
 
-`--week` 必须为周一，省略则为上一完整周。`--dry-run` 强制覆盖配置中的发送开关。`--rows-json` 接受 records API 的 `[{record_id, fields}]`、fields 字典列表或 `{"items": [...]}`。未给 `--data-dir` / 环境变量时，提供 `--sent-log` 会自动使用其父目录补全车辆、门店；快照只读。
+`--week` 必须为周一，省略则为上一完整周。`--dry-run` / `--send` 互斥并覆盖配置中的发送开关；省略二者则沿用配置（默认 dry-run）。`--rows-json` 接受 records API 的 `[{record_id, fields}]`、fields 字典列表或 `{"items": [...]}`。未给 `--data-dir` / 环境变量时，提供 `--sent-log` 会自动使用其父目录补全车辆、门店。仅生成和发送逻辑会读取输入，去重 / 锁占用时在读取输入与访问 API 前返回；CLI 显示跳过原因并以 0 退出。
 
 默认输出 `data/weekly_reports/YYYY-MM-DD_weekly.xlsx` 和 `YYYY-MM-DD_brief.txt`，产物不入 Git。Excel 包含「提醒明细」「未提醒但已填写」「汇总」三张表，汇总按天、大区、门店列出提醒数、填写数及填写率。简报包含周期、去重提醒/填写台数、大区 Top/Bottom、记录数与下载链接。
 
@@ -138,7 +170,7 @@ python3 -m nss.weekly_report --week 2026-10-19 --dry-run \
 python3 -m pytest -q
 ```
 
-全套测试默认禁止真实 HTTP；周报测试覆盖自然周边界、VIN 去重、填写窗口、筛选、未提醒记录、Excel、错峰校验、调度、dry-run 与 SSO 登录下载。
+全套测试默认禁止真实 HTTP；周报测试覆盖自然周边界、VIN 去重、填写窗口、筛选、未提醒记录、Excel、错峰校验、调度、dry-run 与 SSO 登录下载，以及重启后的周键去重、并发锁、原子写失败、sending 超时、手动补发与强制重发。发送和拉取 API 均用 mock。
 
 ## 本地运行
 
