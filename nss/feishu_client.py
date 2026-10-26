@@ -1,4 +1,4 @@
-"""飞书 HeroClaw：tenant token、私聊文本。"""
+"""飞书 HeroClaw：tenant token、私聊与群聊文本。"""
 
 from __future__ import annotations
 
@@ -61,6 +61,22 @@ def send_text_message(open_id: str, text: str) -> dict:
     data = resp.json()
     if data.get("code") != 0:
         raise RuntimeError(data.get("msg") or f"发送失败: {data}")
+    return data.get("data") or {}
+
+
+def send_chat_text(chat_id: str, text: str) -> dict:
+    if not chat_id or not chat_id.strip():
+        raise ValueError("缺少飞书群 chat_id")
+    resp = requests.post(
+        f"{BASE_URL}/im/v1/messages?receive_id_type=chat_id",
+        headers={**auth_headers(), "Content-Type": "application/json"},
+        json={"receive_id": chat_id.strip(), "msg_type": "text", "content": json.dumps({"text": text}, ensure_ascii=False)},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("code") != 0:
+        raise RuntimeError(data.get("msg") or "群消息发送失败")
     return data.get("data") or {}
 
 

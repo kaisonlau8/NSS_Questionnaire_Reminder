@@ -81,6 +81,7 @@
         <button class="ant-btn ant-btn-primary" id="btn-sync" type="button" onclick="syncBitable()"><svg class="ai" aria-hidden="true"><use href="#i-reload"/></svg>同步门店联系人</button>
         <button class="ant-btn" id="btn-sched-start" type="button" onclick="schedStart()"><svg class="ai" aria-hidden="true"><use href="#i-play-circle"/></svg>启动定时</button>
         <button class="ant-btn" id="btn-sched-stop" type="button" onclick="schedStop()"><svg class="ai" aria-hidden="true"><use href="#i-stop"/></svg>停止定时</button>
+        <a class="ant-btn" href="{{ url_for('weekly_reports') }}">周报下载</a>
       </div>
       <p class="muted ant-mt-2" id="sync-hint"></p>
       </div>

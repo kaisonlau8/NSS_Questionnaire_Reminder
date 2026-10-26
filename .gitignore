@@ -11,5 +11,8 @@ __pycache__/
 *.xlsx
 data/*.json
 data/uploads/
+data/weekly_reports/
+data/weekly_report.lock
+data/.weekly_report_state.json.*.tmp
 data/phone_open_ids.json
 config/settings.json
