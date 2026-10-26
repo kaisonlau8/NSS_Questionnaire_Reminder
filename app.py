@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 ROOT = Path(__file__).resolve().parent
@@ -21,7 +21,7 @@ load_dotenv(ROOT / ".env")
 from nss.bitable import load_stores, load_supervisors, load_sync_state, sync_all  # noqa: E402
 from nss.eligibility import ineligible_reason, mask_vin  # noqa: E402
 from nss.matching import enrich_vehicles  # noqa: E402
-from nss.paths import UPLOAD_DIR, ensure_dirs  # noqa: E402
+from nss.paths import UPLOAD_DIR, WEEKLY_REPORT_DIR, ensure_dirs  # noqa: E402
 from nss.reminder import recent_logs, recipients_for, run_reminders, sent_today_count  # noqa: E402
 from nss.scheduler import scheduler_status, start_scheduler, stop_scheduler  # noqa: E402
 from nss.settings import load_settings, save_settings  # noqa: E402
@@ -34,6 +34,7 @@ from nss.vehicles import (  # noqa: E402
     next_due_date,
     vehicles_meta,
 )
+from nss.weekly_report import REPORT_FILENAME_RE  # noqa: E402
 
 ensure_beijing_tz()
 ensure_dirs()
@@ -122,6 +123,28 @@ def index():
 @app.get("/api/status")
 def api_status():
     return jsonify(_status_payload())
+
+
+@app.get("/weekly-reports")
+def weekly_reports():
+    # 与控制台共用上方 m-hero SSO before_request，不加入公开路径白名单。
+    files = [
+        {"name": path.name, "week_start": path.name[:10], "size_kb": round(path.stat().st_size / 1024, 1)}
+        for path in sorted(WEEKLY_REPORT_DIR.glob("*_weekly.xlsx"), reverse=True)
+        if REPORT_FILENAME_RE.fullmatch(path.name) and path.is_file() and not path.is_symlink()
+    ]
+    response = app.make_response(render_template("weekly_reports.html", files=files))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/weekly-reports/<filename>")
+def download_weekly_report(filename: str):
+    if not REPORT_FILENAME_RE.fullmatch(filename) or (WEEKLY_REPORT_DIR / filename).is_symlink():
+        abort(404)
+    response = send_from_directory(WEEKLY_REPORT_DIR, filename, as_attachment=True)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/api/due")
@@ -260,7 +283,10 @@ def api_sync():
 @app.post("/api/settings")
 def api_settings():
     body = request.get_json(silent=True) or {}
-    settings = save_settings(body)
+    try:
+        settings = save_settings(body)
+    except (ValueError, TypeError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     return jsonify({"ok": True, "settings": settings})
 
 
@@ -280,7 +306,10 @@ def api_run():
 
 @app.post("/api/scheduler/start")
 def api_scheduler_start():
-    start_scheduler()
+    try:
+        start_scheduler()
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     return jsonify({"ok": True, "scheduler": scheduler_status()})
 
 

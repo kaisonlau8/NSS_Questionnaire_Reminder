@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 RUNTIME_DIR = ROOT / ".runtime"
 UPLOAD_DIR = DATA_DIR / "uploads"
+WEEKLY_REPORT_DIR = DATA_DIR / "weekly_reports"
 DATASOURCE_DIR = ROOT / "dataSource"
 CONFIG_DIR = ROOT / "config"
 SETTINGS_PATH = CONFIG_DIR / "settings.json"

@@ -143,10 +143,18 @@ def fetch_fields(table_id: str) -> list[dict[str, Any]]:
     return (payload.get("data") or {}).get("items") or []
 
 
-def fetch_records(table_id: str, view_id: str = "") -> list[dict[str, Any]]:
-    cfg = _bitable_ids()
+def fetch_records(
+    table_id: str,
+    view_id: str = "",
+    *,
+    app_token: str | None = None,
+    raw_items: bool = False,
+) -> list[dict[str, Any]]:
+    """只读分页；显式 app_token 可读取独立的数据源，不使用门店表配置。"""
+    token = app_token if app_token is not None else _bitable_ids()["app_token"]
     records: list[dict[str, Any]] = []
     page_token = ""
+    seen_tokens: set[str] = set()
     while True:
         params: dict[str, Any] = {"page_size": 500, "user_id_type": "open_id"}
         if view_id:
@@ -154,7 +162,7 @@ def fetch_records(table_id: str, view_id: str = "") -> list[dict[str, Any]]:
         if page_token:
             params["page_token"] = page_token
         resp = requests.get(
-            f"{BASE_URL}/bitable/v1/apps/{cfg['app_token']}/tables/{table_id}/records",
+            f"{BASE_URL}/bitable/v1/apps/{token}/tables/{table_id}/records",
             headers=auth_headers(),
             params=params,
             timeout=30,
@@ -165,12 +173,13 @@ def fetch_records(table_id: str, view_id: str = "") -> list[dict[str, Any]]:
             raise RuntimeError(_friendly_error(payload))
         data = payload.get("data") or {}
         for item in data.get("items") or []:
-            records.append(item.get("fields") or {})
+            records.append(item if raw_items else item.get("fields") or {})
         if not data.get("has_more"):
             break
         page_token = data.get("page_token") or ""
-        if not page_token:
-            break
+        if not page_token or page_token in seen_tokens:
+            raise RuntimeError("多维表分页异常：has_more=true 但 page_token 缺失或重复，拒绝返回不完整数据")
+        seen_tokens.add(page_token)
     return records
 
 

@@ -6,5 +6,29 @@
   "eligibility": {
     "series_names": ["全新M817"],
     "excluded_data_types": ["试驾车"]
+  },
+  "public_base_url": "",
+  "weekly_report": {
+    "enabled": false,
+    "weekday": 0,
+    "hour": 9,
+    "minute": 30,
+    "chat_id": "oc_ba8af247db2e2dc4955b1d01652add82",
+    "dry_run": true,
+    "link_base": "",
+    "source": {
+      "app_token": "J0BBb0z2ua4bzEs7gumc0YQXn80",
+      "table_id": "tblc8vCaxiWyi64Y",
+      "view_id": "vewRnrIcmG"
+    },
+    "filters": {
+      "type_field": "问卷类型",
+      "type_value": "NPS调研",
+      "period_field": "调研时间",
+      "period_value": "90天",
+      "combined_value": "NPS调研-90天",
+      "combined_fields": ["问卷类型", "调研时间", "问卷名称"]
+    },
+    "nps_field": ""
   }
 }
